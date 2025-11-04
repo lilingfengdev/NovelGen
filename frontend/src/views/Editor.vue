@@ -70,6 +70,24 @@
               </template>
               设置
             </n-tooltip>
+
+            <!-- 插件注入：工作区Tab -->
+            <n-tooltip 
+              v-for="tab in pluginWorkspaceTabs" 
+              :key="tab.key"
+              placement="right" 
+              :delay="300"
+            >
+              <template #trigger>
+                <div 
+                  :class="['toolbar-item', { active: activeWorkspace === tab.key }]"
+                  @click="activeWorkspace = tab.key"
+                >
+                  <component :is="tab.icon" />
+                </div>
+              </template>
+              {{ tab.tooltip || tab.label }}
+            </n-tooltip>
           </div>
         </n-layout-sider>
 
@@ -97,6 +115,14 @@
               </svg>
               </n-button>
           </div>
+          
+          <!-- 插件注入：侧边栏章节列表前 -->
+          <component 
+            v-for="(item, idx) in pluginSidebarBefore" 
+            :key="'sidebar-before-' + idx"
+            :is="item.component"
+            v-bind="item.props || {}"
+          />
               
               <div class="chapter-tree">
                 <transition-group name="chapter-list">
@@ -132,6 +158,14 @@
                 </div>
                 </transition-group>
               </div>
+          
+          <!-- 插件注入：侧边栏章节列表后 -->
+          <component 
+            v-for="(item, idx) in pluginSidebarAfter" 
+            :key="'sidebar-after-' + idx"
+            :is="item.component"
+            v-bind="item.props || {}"
+          />
         </div>
         <div class="sider-resizer" @mousedown="onSiderMouseDown" />
       </n-layout-sider>
@@ -320,14 +354,24 @@
                     <div class="plugin-detail">
                       <div class="plugin-detail-header">
                         <div class="plugin-detail-info">
-                          <h2 class="plugin-detail-name">{{ plugin.name }}</h2>
+                          <h2 class="plugin-detail-name">
+                            {{ plugin.name }}
+                            <span v-if="plugin.is_frontend" class="plugin-badge-builtin">前端</span>
+                          </h2>
                           <span class="plugin-detail-version">v{{ plugin.version }}</span>
                           </div>
                           <n-switch 
+                            v-if="!plugin.is_frontend"
                             :value="isPluginEnabled(plugin.name)"
                             @update:value="(val) => togglePlugin(plugin.name, val)"
                         size="large"
                           />
+                          <span 
+                            v-else 
+                            :class="plugin.is_frontend_enabled ? 'plugin-status-builtin-enabled' : 'plugin-status-builtin-disabled'"
+                          >
+                            {{ plugin.is_frontend_enabled ? '已启用' : '已禁用' }}
+                          </span>
                         </div>
                         
                       <div class="plugin-detail-description">
@@ -343,11 +387,24 @@
                             />
                     </div>
                       
+                      <div v-else-if="!isPluginEnabled(plugin.name)" class="plugin-disabled-notice">
                       <n-empty 
-                        v-else-if="!isPluginEnabled(plugin.name)"
+                          v-if="plugin.is_frontend"
+                          description="该前端插件已禁用"
+                          style="margin-top: 40px;"
+                        >
+                          <template #extra>
+                            <div style="color: rgba(255,255,255,0.5); font-size: 13px; line-height: 1.6; text-align: center; max-width: 400px; margin: 0 auto;">
+                              在 <code style="background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px;">vite.config.js</code> 中修改配置以启用此插件
+                            </div>
+                          </template>
+                        </n-empty>
+                        <n-empty 
+                          v-else
                         description="启用插件以配置选项"
                         style="margin-top: 40px;"
                       />
+                      </div>
                   </div>
                 </n-spin>
               </div>
@@ -356,6 +413,18 @@
         </div>
       </n-layout-content>
             
+        <!-- 插件注入：自定义工作区Tab内容 -->
+        <n-layout-content 
+          v-else-if="pluginWorkspaceTabs.find(t => t.key === activeWorkspace)"
+          :key="activeWorkspace"
+          class="workspace-content"
+        >
+          <component 
+            :is="pluginWorkspaceTabs.find(t => t.key === activeWorkspace).component"
+            v-bind="pluginWorkspaceTabs.find(t => t.key === activeWorkspace).props || {}"
+          />
+        </n-layout-content>
+
         <!-- 系统设置工作区 -->
         <n-layout-content v-else-if="activeWorkspace === 'settings'" key="settings" class="workspace-content">
           <div class="workspace-container">
@@ -653,6 +722,7 @@ import { useGenerationStore } from '../stores/generation'
 import { pluginAPI, generationAPI, workspaceAPI } from '../services/api'
 import PluginConfigForm from '../components/PluginConfigForm.vue'
 import ChapterContent from '../components/ChapterContent.vue'
+import { pluginManager } from '../plugins/manager'
 
 const route = useRoute()
 const message = useMessage()
@@ -703,6 +773,32 @@ const systemConfig = ref({
 })
 const savingSystemConfig = ref(false)
 const logitBiasText = ref('')  // logit_bias的JSON文本
+
+// 插件系统
+const pluginSidebarBefore = computed(() => {
+  return pluginManager.callHook('sidebar.items', {
+    workspace: workspace.value,
+    chapters: chapters.value,
+    currentChapter: currentChapter.value,
+    position: 'before'
+  }).map(r => r.result).filter(Boolean)
+})
+
+const pluginSidebarAfter = computed(() => {
+  return pluginManager.callHook('sidebar.items', {
+    workspace: workspace.value,
+    chapters: chapters.value,
+    currentChapter: currentChapter.value,
+    position: 'after'
+  }).map(r => r.result).filter(Boolean)
+})
+
+const pluginWorkspaceTabs = computed(() => {
+  return pluginManager.callHook('workspace.tabs', {
+    workspace: workspace.value,
+    chapters: chapters.value
+  }).map(r => r.result).filter(Boolean).sort((a, b) => (a.order || 100) - (b.order || 100))
+})
 
 // 侧边栏可拉伸宽度
 const SIDEBAR_MIN = 240
@@ -798,8 +894,22 @@ async function loadPlugins() {
   try {
     pluginsLoading.value = true
     
-    // 获取所有插件
-    availablePlugins.value = await pluginAPI.list()
+    // 获取后端插件
+    const backendPlugins = await pluginAPI.list()
+    
+    // 获取前端插件（包括禁用的）
+    const frontendPlugins = pluginManager.getPlugins().map(plugin => ({
+      name: plugin.name,
+      version: plugin.version || '1.0.0',
+      description: plugin.description || '前端插件',
+      author: plugin.author || '',
+      is_frontend: true,
+      is_frontend_enabled: plugin.enabled,
+      config_schema: null
+    }))
+    
+    // 合并插件列表：前端插件在前，后端插件在后
+    availablePlugins.value = [...frontendPlugins, ...backendPlugins]
     
     // 获取当前工作空间的插件配置
     const configData = await pluginAPI.getConfig(workspaceId.value)
@@ -818,6 +928,11 @@ async function loadPlugins() {
 }
 
 function isPluginEnabled(pluginName) {
+  // 前端插件根据配置文件决定
+  const plugin = availablePlugins.value.find(p => p.name === pluginName)
+  if (plugin?.is_frontend) {
+    return plugin.is_frontend_enabled
+  }
   return pluginsConfig.value[pluginName]?.enabled !== false
 }
 
@@ -826,6 +941,13 @@ function getPluginConfig(pluginName) {
 }
 
 async function togglePlugin(pluginName, enabled) {
+  // 前端插件不允许禁用
+  const plugin = availablePlugins.value.find(p => p.name === pluginName)
+  if (plugin?.is_frontend) {
+    message.warning('前端插件不能禁用')
+    return
+  }
+  
   try {
     await pluginAPI.toggle(workspaceId.value, pluginName, enabled)
     
@@ -1129,13 +1251,22 @@ function getStatusText(status) {
 }
 
 function getChapterActions(chapter) {
-  return [
+  const baseActions = [
     { label: '回退到此章节', key: 'rollback' },
     { label: '删除', key: 'delete' }
   ]
+  
+  // 添加插件注册的章节操作
+  const pluginActions = pluginManager.callHook('sidebar.chapter.actions', {
+    chapter,
+    workspace: workspace.value
+  }).map(r => r.result).filter(Boolean)
+  
+  return [...baseActions, ...pluginActions]
 }
 
 async function handleChapterAction(key, chapter) {
+  // 处理内置操作
   if (key === 'rollback') {
     dialog.warning({
       title: '确认回退',
@@ -1154,6 +1285,22 @@ async function handleChapterAction(key, chapter) {
         }
       }
     })
+    return
+  }
+  
+  // 处理插件操作
+  const pluginActions = pluginManager.callHook('sidebar.chapter.actions', {
+    chapter,
+    workspace: workspace.value
+  }).map(r => r.result).filter(Boolean)
+  
+  const pluginAction = pluginActions.find(a => a.key === key)
+  if (pluginAction && pluginAction.handler) {
+    try {
+      await pluginAction.handler(chapter)
+    } catch (error) {
+      message.error('操作失败: ' + error.message)
+    }
   }
 }
 
@@ -2097,6 +2244,42 @@ async function saveSystemConfig() {
   font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.plugin-badge-builtin {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  background: rgba(24, 160, 88, 0.15);
+  border: 1px solid rgba(24, 160, 88, 0.3);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #18a058;
+  letter-spacing: 0.5px;
+}
+
+.plugin-status-builtin-enabled {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(24, 160, 88, 0.9);
+  padding: 8px 16px;
+  background: rgba(24, 160, 88, 0.1);
+  border-radius: 18px;
+  border: 1px solid rgba(24, 160, 88, 0.2);
+}
+
+.plugin-status-builtin-disabled {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .plugin-detail-version {
