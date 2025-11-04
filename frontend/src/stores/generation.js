@@ -7,6 +7,43 @@ export const useGenerationStore = defineStore('generation', () => {
   const loading = ref(false)
   const stage = ref('idle') // idle, planning, generating, verifying, improving
 
+  // 获取系统配置的生成参数
+  function getGenerationParams() {
+    try {
+      const config = localStorage.getItem('systemConfig')
+      if (config) {
+        const parsed = JSON.parse(config)
+        // 只返回非null的参数，保证兼容性
+        const params = {}
+        if (parsed.temperature !== null && parsed.temperature !== undefined) {
+          params.temperature = parsed.temperature
+        }
+        if (parsed.max_tokens !== null && parsed.max_tokens !== undefined) {
+          params.max_tokens = parsed.max_tokens
+        }
+        if (parsed.top_p !== null && parsed.top_p !== undefined) {
+          params.top_p = parsed.top_p
+        }
+        if (parsed.top_k !== null && parsed.top_k !== undefined) {
+          params.top_k = parsed.top_k
+        }
+        if (parsed.frequency_penalty !== null && parsed.frequency_penalty !== undefined) {
+          params.frequency_penalty = parsed.frequency_penalty
+        }
+        if (parsed.presence_penalty !== null && parsed.presence_penalty !== undefined) {
+          params.presence_penalty = parsed.presence_penalty
+        }
+        if (parsed.logit_bias !== null && parsed.logit_bias !== undefined) {
+          params.logit_bias = parsed.logit_bias
+        }
+        return params
+      }
+    } catch (e) {
+      console.error('读取配置失败:', e)
+    }
+    return {}
+  }
+
   // 生成大纲
   async function createPlan(workspaceId, chapterNumber, userInput = null) {
     loading.value = true
@@ -35,7 +72,8 @@ export const useGenerationStore = defineStore('generation', () => {
     try {
       const result = await generationAPI.generate({
         chapter_id: chapterId,
-        regenerate
+        regenerate,
+        ...getGenerationParams()
       })
       currentChapter.value = await chapterAPI.get(chapterId)
       return result
@@ -54,7 +92,8 @@ export const useGenerationStore = defineStore('generation', () => {
     stage.value = 'verifying'
     try {
       const result = await generationAPI.verify({
-        chapter_id: chapterId
+        chapter_id: chapterId,
+        ...getGenerationParams()
       })
       currentChapter.value = await chapterAPI.get(chapterId)
       return result
@@ -74,7 +113,8 @@ export const useGenerationStore = defineStore('generation', () => {
     try {
       const result = await generationAPI.improve({
         chapter_id: chapterId,
-        focus_issues: focusIssues
+        focus_issues: focusIssues,
+        ...getGenerationParams()
       })
       currentChapter.value = await chapterAPI.get(chapterId)
       return result

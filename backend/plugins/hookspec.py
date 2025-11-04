@@ -54,6 +54,28 @@ class NovelGenHookSpec:
         """
         pass
     
+    @hookspec
+    def hook_extend_create_plan_params(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """扩展 create_plan 工具的参数
+        
+        插件可以返回额外的参数定义，这些参数会被合并到 create_plan 工具中。
+        返回的字典格式：
+        {
+            "param_name": {
+                "type": type,  # Python 类型
+                "description": "参数描述",
+                "required": True/False  # 可选，默认 False
+            }
+        }
+        
+        Args:
+            context: 上下文信息
+            
+        Returns:
+            额外参数定义字典，返回 None 则不扩展
+        """
+        pass
+    
     # ============ 内容修改 ============
     
     @hookspec

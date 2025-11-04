@@ -159,3 +159,32 @@ class PluginToggleRequest(BaseModel):
     """插件启用/禁用请求"""
     enabled: bool = Field(..., description="是否启用")
 
+
+# ============ System Settings Schemas ============
+
+class SystemSettingsResponse(BaseModel):
+    """系统设置响应 - 用于前端显示"""
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API Key")
+    openai_base_url: Optional[str] = Field(None, description="OpenAI Base URL")
+    openai_model: str = Field("gpt-4-turbo-preview", description="默认模型")
+    access_password: Optional[str] = Field(None, description="访问密码")
+    
+    class Config:
+        from_attributes = True
+
+
+class SystemSettingsUpdate(BaseModel):
+    """系统设置更新请求"""
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API Key")
+    openai_base_url: Optional[str] = Field(None, description="OpenAI Base URL")
+    openai_model: Optional[str] = Field(None, description="默认模型")
+    access_password: Optional[str] = Field(None, description="访问密码，留空则不启用")
+
+
+class SystemSettingsPublic(BaseModel):
+    """系统设置公开信息 - 不包含敏感信息"""
+    openai_base_url: Optional[str] = None
+    openai_model: str = "gpt-4-turbo-preview"
+    has_password: bool = False  # 是否设置了访问密码
+    has_api_key: bool = False  # 是否设置了 API Key
+

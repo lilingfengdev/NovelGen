@@ -133,7 +133,8 @@ class GenerationService:
         )
         
         # 对话式生成大纲
-        result = await generation_engine.plan_interactive(
+        result = await generation_engine.plan(
+            db=db,
             workspace_id=workspace_id,
             chapter_number=chapter_number,
             messages=messages,
@@ -239,6 +240,7 @@ class GenerationService:
         await db.flush()
         
         content = await generation_engine.generate(
+            db=db,
             chapter=chapter,
             workspace_id=chapter.workspace_id,
             previous_chapters=previous_chapters,
@@ -271,6 +273,7 @@ class GenerationService:
         await db.flush()
         
         result = await generation_engine.verify(
+            db=db,
             chapter=chapter,
             workspace_id=chapter.workspace_id,
             model=model
@@ -304,6 +307,7 @@ class GenerationService:
         await db.flush()
         
         improved_content = await generation_engine.improve(
+            db=db,
             chapter=chapter,
             verification_result=chapter.verification_result,
             workspace_id=chapter.workspace_id,

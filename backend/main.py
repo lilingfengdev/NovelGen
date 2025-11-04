@@ -6,7 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.database import init_db
 from backend.plugins.manager import plugin_manager
-from backend.api import workspace, generation, chapter, plugins
+from backend.api import workspace, generation, chapter, plugins, auth
+from backend.api import settings as settings_api
+from backend.middleware import AuthMiddleware
 
 
 @asynccontextmanager
@@ -57,11 +59,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 添加认证中间件
+app.add_middleware(AuthMiddleware)
+
 # 注册路由
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(workspace.router, prefix="/api/workspace", tags=["workspace"])
 app.include_router(generation.router, prefix="/api", tags=["generation"])
 app.include_router(chapter.router, prefix="/api", tags=["chapter"])
 app.include_router(plugins.router, prefix="/api/plugins", tags=["plugins"])
+app.include_router(settings_api.router, prefix="/api/settings", tags=["settings"])
 
 
 @app.get("/")

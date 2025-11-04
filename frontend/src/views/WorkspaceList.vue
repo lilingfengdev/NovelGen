@@ -4,15 +4,31 @@
       <n-layout-header class="header" bordered>
         <div class="header-content">
           <h1 class="logo">
-            <span class="logo-icon">📖</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="logo-icon">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
             Novel Studio
           </h1>
+          <n-space align="center">
+            <n-button circle quaternary size="large" @click="showSettingsModal = true" class="settings-btn">
+              <template #icon>
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </template>
+            </n-button>
           <n-button type="primary" size="large" @click="showCreateModal = true" class="create-btn">
             <template #icon>
-              <span>✨</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
             </template>
             创建新小说
           </n-button>
+          </n-space>
         </div>
       </n-layout-header>
 
@@ -26,7 +42,10 @@
             class="search-input"
           >
             <template #prefix>
-              <span>🔍</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
             </template>
           </n-input>
           
@@ -50,7 +69,10 @@
             class="empty-state"
           >
             <template #icon>
-              <span class="empty-icon">📚</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
             </template>
             <template #extra>
               <n-button type="primary" size="large" @click="showCreateModal = true">
@@ -65,7 +87,10 @@
             class="empty-state"
           >
             <template #icon>
-              <span class="empty-icon">🔍</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="empty-icon">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
             </template>
           </n-empty>
           
@@ -101,10 +126,18 @@
                     <div class="card-meta">
                       <n-space size="small">
                         <span class="meta-item" :title="formatDate(workspace.updated_at)">
-                          🕒 {{ formatRelativeTime(workspace.updated_at) }}
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="meta-icon">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                          </svg>
+                          {{ formatRelativeTime(workspace.updated_at) }}
                         </span>
                         <span class="meta-item" v-if="workspace.chapter_count !== undefined">
-                          📝 {{ workspace.chapter_count }} 章
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="meta-icon">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                          </svg>
+                          {{ workspace.chapter_count }} 章
                         </span>
                       </n-space>
                     </div>
@@ -138,7 +171,10 @@
                         class="delete-btn"
                       >
                         <template #icon>
-                          <span>🗑️</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
                         </template>
                       </n-button>
                     </div>
@@ -208,27 +244,110 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 系统设置对话框 -->
+    <n-modal
+      v-model:show="showSettingsModal"
+      preset="card"
+      title="系统设置"
+      class="settings-modal"
+      :style="{ maxWidth: '600px' }"
+    >
+      <n-spin :show="settingsStore.loading">
+        <n-form
+          ref="settingsFormRef"
+          :model="settingsForm"
+          label-placement="left"
+          label-width="120"
+        >
+          <n-divider title-placement="left">AI 模型配置</n-divider>
+          
+          <n-form-item label="OpenAI API Key" path="openai_api_key">
+            <n-input
+              v-model:value="settingsForm.openai_api_key"
+              type="password"
+              show-password-on="click"
+              :placeholder="settingsStore.publicInfo.has_api_key ? '已设置（留空表示不修改）' : '请输入 API Key'"
+              clearable
+            />
+          </n-form-item>
+          
+          <n-form-item label="Base URL" path="openai_base_url">
+            <n-input
+              v-model:value="settingsForm.openai_base_url"
+              placeholder="https://api.openai.com/v1"
+              clearable
+            />
+          </n-form-item>
+          
+          <n-form-item label="默认模型" path="openai_model">
+            <n-input
+              v-model:value="settingsForm.openai_model"
+              placeholder="gpt-4-turbo-preview"
+            />
+          </n-form-item>
+          
+          <n-divider title-placement="left">安全设置</n-divider>
+          
+          <n-form-item label="访问密码" path="access_password">
+            <n-input
+              v-model:value="settingsForm.access_password"
+              type="password"
+              show-password-on="click"
+              :placeholder="settingsStore.publicInfo.has_password ? '已设置（留空表示不修改）' : '留空表示不启用密码保护'"
+              clearable
+            />
+          </n-form-item>
+          
+          <n-alert type="info" :show-icon="false" style="margin-top: 12px">
+            配置保存后立即生效。API Key 和密码会安全加密存储在服务器，不会在前端显示。
+          </n-alert>
+          
+          <n-alert v-if="settingsStore.publicInfo.has_api_key || settingsStore.publicInfo.has_password" type="success" :show-icon="false" style="margin-top: 8px">
+            <div v-if="settingsStore.publicInfo.has_api_key">OpenAI API Key：已设置</div>
+            <div v-if="settingsStore.publicInfo.has_password">访问密码：已设置</div>
+          </n-alert>
+        </n-form>
+      </n-spin>
+      
+      <template #footer>
+        <n-space justify="space-between">
+          <n-button text type="error" @click="handleResetSettings">
+            重置为默认
+          </n-button>
+          <n-space>
+            <n-button @click="showSettingsModal = false">取消</n-button>
+            <n-button type="primary" @click="handleSaveSettings" :loading="settingsStore.loading">
+              保存
+            </n-button>
+          </n-space>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage, useDialog } from 'naive-ui'
 import {
   NLayout, NLayoutHeader, NLayoutContent,
   NButton, NCard, NGrid, NGridItem, NTag, NEllipsis,
   NSpin, NEmpty, NModal, NForm, NFormItem, NInput, NSpace, NDynamicTags,
-  NSelect
+  NSelect, NDivider, NAlert
 } from 'naive-ui'
 import { useWorkspaceStore } from '../stores/workspace'
+import { useSettingsStore } from '../stores/settings'
 
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const store = useWorkspaceStore()
+const settingsStore = useSettingsStore()
 
 const showCreateModal = ref(false)
+const showSettingsModal = ref(false)
 const creating = ref(false)
 const searchQuery = ref('')
 const sortBy = ref('updated_desc')
@@ -241,7 +360,15 @@ const formData = ref({
   tags: []
 })
 
+const settingsForm = ref({
+  openai_api_key: '',
+  openai_base_url: '',
+  openai_model: 'gpt-4-turbo-preview',
+  access_password: ''
+})
+
 const formRef = ref(null)
+const settingsFormRef = ref(null)
 
 // 表单验证规则 - 这才是正确的做法
 const formRules = {
@@ -330,6 +457,26 @@ function formatRelativeTime(dateStr) {
   return `${Math.floor(days / 365)}年前`
 }
 
+// 监听设置对话框打开，加载设置
+watch(showSettingsModal, async (newVal) => {
+  if (newVal) {
+    try {
+      await settingsStore.loadPublicInfo()
+      await settingsStore.loadSettings()
+      
+      // 不显示敏感信息，只加载非敏感配置
+      settingsForm.value = {
+        openai_api_key: '',  // 留空，让用户只在修改时输入
+        openai_base_url: settingsStore.settings.openai_base_url || '',
+        openai_model: settingsStore.settings.openai_model || 'gpt-4-turbo-preview',
+        access_password: ''  // 留空，让用户只在修改时输入
+      }
+    } catch (error) {
+      message.error('加载设置失败: ' + error.message)
+    }
+  }
+})
+
 onMounted(async () => {
   try {
     await store.loadWorkspaces()
@@ -384,6 +531,52 @@ function handleDelete(id) {
     }
   })
 }
+
+async function handleSaveSettings() {
+  try {
+    // 只提交用户修改的字段（非空的）
+    const updateData = {}
+    
+    if (settingsForm.value.openai_api_key) {
+      updateData.openai_api_key = settingsForm.value.openai_api_key
+    }
+    if (settingsForm.value.openai_base_url !== undefined && settingsForm.value.openai_base_url !== null) {
+      updateData.openai_base_url = settingsForm.value.openai_base_url
+    }
+    if (settingsForm.value.openai_model) {
+      updateData.openai_model = settingsForm.value.openai_model
+    }
+    if (settingsForm.value.access_password) {
+      updateData.access_password = settingsForm.value.access_password
+    }
+    
+    await settingsStore.updateSettings(updateData)
+    await settingsStore.loadPublicInfo()  // 重新加载公开信息
+    
+    message.success('设置已保存')
+    showSettingsModal.value = false
+  } catch (error) {
+    message.error('保存失败: ' + error.message)
+  }
+}
+
+function handleResetSettings() {
+  dialog.warning({
+    title: '确认重置',
+    content: '将清空所有配置，恢复到默认值。确定要重置吗？',
+    positiveText: '重置',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await settingsStore.resetSettings()
+        settingsForm.value = { ...settingsStore.settings }
+        message.success('已重置')
+      } catch (error) {
+        message.error('重置失败: ' + error.message)
+      }
+    }
+  })
+}
 </script>
 
 <style scoped>
@@ -422,7 +615,18 @@ function handleDelete(id) {
 }
 
 .logo-icon {
-  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.settings-btn {
+  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s ease;
+}
+
+.settings-btn:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.08) !important;
+  transform: rotate(45deg);
 }
 
 .create-btn {
@@ -468,7 +672,7 @@ function handleDelete(id) {
 }
 
 .empty-icon {
-  font-size: 48px;
+  opacity: 0.3;
 }
 
 /* 卡片样式 */
@@ -539,6 +743,11 @@ function handleDelete(id) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.meta-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .card-footer {

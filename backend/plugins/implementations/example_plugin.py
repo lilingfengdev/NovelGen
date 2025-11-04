@@ -31,6 +31,35 @@ class ExamplePlugin:
         return None
     
     @hookimpl
+    def hook_extend_create_plan_params(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """扩展 create_plan 工具的参数
+        
+        示例：添加世界观相关的参数
+        """
+        return {
+            "world_setting": {
+                "type": str,
+                "description": "世界观设定",
+                "required": False
+            },
+            "key_items": {
+                "type": List[str],
+                "description": "本章出现的关键物品",
+                "required": False
+            },
+            "location": {
+                "type": str,
+                "description": "主要场景地点",
+                "required": False
+            },
+            "chapter_tags": {
+                "type": List[str],
+                "description": "章节标签（如：战斗、日常、转折）",
+                "required": False
+            }
+        }
+    
+    @hookimpl
     def hook_after_plan(self, plan: str, context: Dict[str, Any]) -> Optional[str]:
         """Plan后的处理"""
         print(f"[{self.name}] Plan生成完成，长度: {len(plan)}")
