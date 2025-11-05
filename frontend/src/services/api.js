@@ -61,7 +61,6 @@ export const chapterAPI = {
 
 // Generation API
 export const generationAPI = {
-  plan: (data) => api.post('/plan', data),
   planInteractive: (data) => api.post('/plan/interactive', data),
   generate: (data) => api.post('/generate', data),
   verify: (data) => api.post('/verify', data),

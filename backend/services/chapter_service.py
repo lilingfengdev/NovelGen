@@ -28,7 +28,7 @@ class ChapterService:
             generation_history=[]
         )
         db.add(chapter)
-        await db.flush()
+        await db.commit()
         await db.refresh(chapter)
         return chapter
     
@@ -83,7 +83,7 @@ class ChapterService:
             return False
         
         await db.delete(chapter)
-        await db.flush()
+        await db.commit()
         return True
     
     @staticmethod
@@ -111,7 +111,7 @@ class ChapterService:
         if chapter.plugin_snapshot:
             plugin_manager.restore_plugin_states(workspace_id, chapter.plugin_snapshot)
         
-        await db.flush()
+        await db.commit()
         return True
 
 
@@ -132,6 +132,21 @@ class GenerationService:
             db, workspace_id, chapter_number
         )
         
+        # 第一次调用时就创建章节（如果不存在）
+        from sqlalchemy import select
+        query = select(Chapter).where(
+            Chapter.workspace_id == workspace_id,
+            Chapter.chapter_number == chapter_number
+        )
+        db_result = await db.execute(query)
+        chapter = db_result.scalar_one_or_none()
+        
+        if not chapter:
+            chapter = await ChapterService.create_chapter(
+                db, workspace_id, chapter_number,
+                title=f"第{chapter_number}章（创建中...）"
+            )
+        
         # 对话式生成大纲
         result = await generation_engine.plan(
             db=db,
@@ -142,78 +157,25 @@ class GenerationService:
             model=model
         )
         
-        # 如果完成了，创建或更新章节
-        if result["completed"] and result["plan"]:
-            from sqlalchemy import select
-            query = select(Chapter).where(
-                Chapter.workspace_id == workspace_id,
-                Chapter.chapter_number == chapter_number
-            )
-            db_result = await db.execute(query)
-            chapter = db_result.scalar_one_or_none()
-            
-            if chapter:
-                chapter.plan = result["plan"]
-                chapter.status = ChapterStatus.PLANNING
-            else:
-                chapter = await ChapterService.create_chapter(
-                    db, workspace_id, chapter_number
-                )
-                chapter.plan = result["plan"]
-            
-            chapter.add_history_entry("plan", {"plan": result["plan"]})
-            await db.flush()
-            await db.refresh(chapter)
-            
-            result["chapter_id"] = chapter.id
+        # 保存对话历史（每次都保存）
+        chapter.plan_chat_messages = result["messages"]
+        
+        # 更新章节的 plan 和 plan_data
+        if result.get("plan"):
+            chapter.plan = result["plan"]
+            chapter.plan_data = result.get("plan_data")  # 保存结构化数据
+            chapter.status = ChapterStatus.PLANNING
+            if result["completed"]:
+                # 完成时更新标题并记录历史
+                chapter.title = None  # 清除"创建中"标记
+                chapter.add_history_entry("plan", {"plan": result["plan"]})
+        
+        await db.commit()
+        await db.refresh(chapter)
+        
+        result["chapter_id"] = chapter.id
         
         return result
-    
-    @staticmethod
-    async def execute_plan(
-        db: AsyncSession,
-        workspace_id: int,
-        chapter_number: int,
-        user_input: Optional[str] = None,
-        model: Optional[str] = None
-    ) -> Chapter:
-        """执行Plan阶段"""
-        # 获取之前的章节
-        previous_chapters = await ChapterService.get_previous_chapters(
-            db, workspace_id, chapter_number
-        )
-        
-        # 生成大纲
-        plan = await generation_engine.plan(
-            workspace_id=workspace_id,
-            chapter_number=chapter_number,
-            user_input=user_input,
-            previous_chapters=previous_chapters,
-            model=model
-        )
-        
-        # 创建或更新章节
-        result = await db.execute(
-            select(Chapter)
-            .where(Chapter.workspace_id == workspace_id)
-            .where(Chapter.chapter_number == chapter_number)
-        )
-        chapter = result.scalar_one_or_none()
-        
-        if chapter:
-            chapter.plan = plan
-            chapter.status = ChapterStatus.PLANNING
-        else:
-            chapter = await ChapterService.create_chapter(
-                db, workspace_id, chapter_number
-            )
-            chapter.plan = plan
-        
-        chapter.add_history_entry("plan", {"plan": plan})
-        
-        await db.flush()
-        await db.refresh(chapter)
-        return chapter
     
     @staticmethod
     async def execute_generate(
@@ -237,7 +199,7 @@ class GenerationService:
         
         # 生成内容
         chapter.status = ChapterStatus.GENERATING
-        await db.flush()
+        await db.commit()
         
         content = await generation_engine.generate(
             db=db,
@@ -250,7 +212,7 @@ class GenerationService:
         chapter.content = content
         chapter.add_history_entry("generate", {"content": content})
         
-        await db.flush()
+        await db.commit()
         await db.refresh(chapter)
         return chapter
     
@@ -270,7 +232,7 @@ class GenerationService:
         
         # 验证内容
         chapter.status = ChapterStatus.VERIFYING
-        await db.flush()
+        await db.commit()
         
         result = await generation_engine.verify(
             db=db,
@@ -283,7 +245,7 @@ class GenerationService:
         chapter.verification_passed = 1 if result.get("passed") else -1
         chapter.add_history_entry("verify", {"result": result})
         
-        await db.flush()
+        await db.commit()
         await db.refresh(chapter)
         return result
     
@@ -304,7 +266,7 @@ class GenerationService:
         
         # 改进内容
         chapter.status = ChapterStatus.IMPROVING
-        await db.flush()
+        await db.commit()
         
         improved_content = await generation_engine.improve(
             db=db,
@@ -326,7 +288,7 @@ class GenerationService:
         chapter.verification_passed = 0
         chapter.verification_result = None
         
-        await db.flush()
+        await db.commit()
         await db.refresh(chapter)
         return chapter
     
@@ -346,7 +308,7 @@ class GenerationService:
             workspace_id=chapter.workspace_id
         )
         
-        await db.flush()
+        await db.commit()
         await db.refresh(chapter)
         return chapter
 

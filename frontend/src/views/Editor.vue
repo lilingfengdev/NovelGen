@@ -173,7 +173,8 @@
       <!-- 主内容区 -->
       <n-layout-content class="main-content">
         <!-- 对话式创建章节 -->
-        <div v-if="planChatActive" class="plan-chat-view">
+        <transition name="slide-fade" mode="out-in">
+        <div v-if="planChatActive" key="plan-chat" class="plan-chat-view">
           <div class="plan-chat-header">
             <div class="header-title">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -265,15 +266,22 @@
             </div>
           </div>
 
-          <div v-if="planCompleted" class="plan-completed-banner">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <div v-if="planCompleted" style="text-align: center;">
+            <div class="plan-completed-hint">
+              <div class="hint-content">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
-            <span>大纲已生成</span>
-            <n-button size="small" type="success" @click="finishPlanChat">查看章节</n-button>
+                <span>大纲已创建</span>
+              </div>
+              <div class="hint-actions">
+                <n-button text size="tiny" @click="showPlanPreview = true">预览</n-button>
+                <n-button text size="tiny" type="primary" @click="confirmPlanPreview">确认</n-button>
+              </div>
+            </div>
           </div>
 
-          <div v-if="!planCompleted" class="plan-chat-input">
+          <div class="plan-chat-input">
             <n-input
               v-model:value="userMessage"
               type="textarea"
@@ -297,10 +305,11 @@
             </div>
           </div>
         </div>
-
+        
         <!-- 空状态 -->
         <n-empty 
           v-else-if="!currentChapter" 
+          key="empty-state"
           description="选择章节开始编辑"
           class="empty-state"
         >
@@ -315,7 +324,9 @@
         <!-- 章节内容 -->
         <chapter-content
           v-else
+          key="chapter-content"
           :chapter="currentChapter"
+          :loading="genStore.loading"
           :get-status-type="getStatusType"
           :get-status-text="getStatusText"
           @plan="handlePlan"
@@ -324,6 +335,7 @@
           @improve="handleImprove"
           @finalize="handleFinalize"
         />
+        </transition>
       </n-layout-content>
         </n-layout>
 
@@ -702,6 +714,63 @@
       </n-layout>
     </n-layout>
 
+    <!-- Plan预览面板 - VSCode风格 -->
+    <n-drawer
+      v-model:show="showPlanPreview"
+      :width="500"
+      placement="right"
+      :trap-focus="false"
+      :block-scroll="false"
+    >
+      <n-drawer-content title="大纲预览" closable>
+        <div v-if="currentPlanData" class="plan-preview-content">
+          <div class="preview-field" v-if="currentPlanData.title">
+            <div class="preview-field-label">标题</div>
+            <div class="preview-field-value title">{{ currentPlanData.title }}</div>
+          </div>
+
+          <div class="preview-field" v-if="currentPlanData.plot_points && currentPlanData.plot_points.length">
+            <div class="preview-field-label">主要情节点</div>
+            <div class="preview-field-value">
+              <ol class="preview-list">
+                <li v-for="(point, idx) in currentPlanData.plot_points" :key="idx">{{ point }}</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="preview-field" v-if="currentPlanData.characters && currentPlanData.characters.length">
+            <div class="preview-field-label">涉及角色</div>
+            <div class="preview-field-value">
+              <div class="preview-tags">
+                <span v-for="char in currentPlanData.characters" :key="char" class="preview-tag">{{ char }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="preview-field" v-if="currentPlanData.direction">
+            <div class="preview-field-label">情节推进方向</div>
+            <div class="preview-field-value">{{ currentPlanData.direction }}</div>
+          </div>
+
+          <div class="preview-field" v-if="currentPlanData.scenes && currentPlanData.scenes.length">
+            <div class="preview-field-label">重要场景</div>
+            <div class="preview-field-value">
+              <ol class="preview-list">
+                <li v-for="(scene, idx) in currentPlanData.scenes" :key="idx">{{ scene }}</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="preview-footer">
+            <n-button @click="startOverPlan">重新规划</n-button>
+            <n-button type="primary" @click="confirmPlanPreview">确认并查看章节</n-button>
+          </div>
+        </template>
+      </n-drawer-content>
+    </n-drawer>
+
   </div>
 </template>
 
@@ -715,11 +784,11 @@ import {
   NDropdown, NInput, NInputNumber,
   NTooltip, NSlider, NDivider,
   NSwitch, NCollapse, NCollapseItem,
-  NTabs, NTabPane
+  NTabs, NTabPane, NDrawer, NDrawerContent
 } from 'naive-ui'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useGenerationStore } from '../stores/generation'
-import { pluginAPI, generationAPI, workspaceAPI } from '../services/api'
+import { pluginAPI, generationAPI, workspaceAPI, chapterAPI } from '../services/api'
 import PluginConfigForm from '../components/PluginConfigForm.vue'
 import ChapterContent from '../components/ChapterContent.vue'
 import { pluginManager } from '../plugins/manager'
@@ -750,10 +819,12 @@ const planChatMessages = ref([])
 const userMessage = ref('')
 const planGenerating = ref(false)
 const planCompleted = ref(false)
+const currentPlanData = ref(null)  // 结构化的plan数据
 const currentPlanChapterId = ref(null)
 const messagesContainer = ref(null)
 const editingMessageIndex = ref(null)
 const editingMessageContent = ref('')
+const showPlanPreview = ref(false)  // 显示Plan预览面板
 
 // 插件相关状态
 const availablePlugins = ref([])
@@ -984,6 +1055,7 @@ async function updatePluginConfig(pluginName, config) {
 async function selectChapter(chapterId) {
   try {
     await genStore.loadChapter(chapterId)
+    console.log('加载章节后的数据:', JSON.stringify(currentChapter.value, null, 2))
   } catch (error) {
     message.error('加载章节失败: ' + error.message)
   }
@@ -1024,46 +1096,33 @@ async function continueChat() {
   try {
     planGenerating.value = true
     
-    // 获取生成参数
-    const genParams = {}
-    if (systemConfig.value.temperature !== null && systemConfig.value.temperature !== undefined) {
-      genParams.temperature = systemConfig.value.temperature
-    }
-    if (systemConfig.value.max_tokens !== null && systemConfig.value.max_tokens !== undefined) {
-      genParams.max_tokens = systemConfig.value.max_tokens
-    }
-    if (systemConfig.value.top_p !== null && systemConfig.value.top_p !== undefined) {
-      genParams.top_p = systemConfig.value.top_p
-    }
-    if (systemConfig.value.top_k !== null && systemConfig.value.top_k !== undefined) {
-      genParams.top_k = systemConfig.value.top_k
-    }
-    if (systemConfig.value.frequency_penalty !== null && systemConfig.value.frequency_penalty !== undefined) {
-      genParams.frequency_penalty = systemConfig.value.frequency_penalty
-    }
-    if (systemConfig.value.presence_penalty !== null && systemConfig.value.presence_penalty !== undefined) {
-      genParams.presence_penalty = systemConfig.value.presence_penalty
-    }
-    if (systemConfig.value.logit_bias !== null && systemConfig.value.logit_bias !== undefined) {
-      genParams.logit_bias = systemConfig.value.logit_bias
-    }
-    
+    // 生成参数从 workspace.config 读取，不需要在请求中传递
     const result = await generationAPI.planInteractive({
       workspace_id: workspaceId.value,
       chapter_number: newChapterNumber.value,
       messages: planChatMessages.value,
-      ...genParams
+      model: systemConfig.value.model || null
     })
     
     // 更新消息历史
     planChatMessages.value = result.messages
     
-    // 检查是否完成
-    if (result.completed && result.plan) {
-      planCompleted.value = true
+    // 保存章节ID（第一次返回时）
+    if (result.chapter_id && !currentPlanChapterId.value) {
       currentPlanChapterId.value = result.chapter_id
+      // 刷新章节列表，显示新创建的章节
       await workspaceStore.loadChapters(workspaceId.value)
-      message.success('大纲创建完成！')
+    }
+    
+    // 检查是否完成
+    if (result.completed) {
+      const isUpdate = planCompleted.value  // 判断是创建还是更新
+      planCompleted.value = true
+      currentPlanData.value = result.plan_data || null
+      showPlanPreview.value = true  // 打开预览面板
+      // 再次刷新以更新章节状态
+      await workspaceStore.loadChapters(workspaceId.value)
+      message.success(isUpdate ? '大纲已更新！' : '大纲创建完成！')
     }
   } catch (error) {
     message.error('对话失败: ' + error.message)
@@ -1076,8 +1135,11 @@ async function continueChat() {
 async function finishPlanChat() {
   if (currentPlanChapterId.value) {
     await genStore.loadChapter(currentPlanChapterId.value)
-  }
+    // 不重置对话状态，只是切换视图
+    planChatActive.value = false
+  } else {
   resetPlanChat()
+  }
 }
 
 // 取消对话
@@ -1096,10 +1158,27 @@ function resetPlanChat() {
   userMessage.value = ''
   planGenerating.value = false
   planCompleted.value = false
+  currentPlanData.value = null
   currentPlanChapterId.value = null
   editingMessageIndex.value = null
   editingMessageContent.value = ''
   newChapterNumber.value = chapters.value.length + 1
+  showPlanPreview.value = false
+}
+
+// 重新规划
+function startOverPlan() {
+  planCompleted.value = false
+  currentPlanData.value = null
+  planChatMessages.value = []
+  userMessage.value = ''
+  showPlanPreview.value = false
+}
+
+// 关闭预览并确认
+function confirmPlanPreview() {
+  showPlanPreview.value = false
+  finishPlanChat()
 }
 
 // 开始编辑消息
@@ -1177,52 +1256,77 @@ async function handleCreateChapter() {
 }
 
 async function handlePlan() {
-  try {
-    await genStore.createPlan(workspaceId.value, currentChapter.value.chapter_number)
-    message.success('大纲生成成功')
-  } catch (error) {
-    message.error('生成失败: ' + error.message)
+  // 切换到对话界面生成大纲
+  if (currentChapter.value) {
+    // 如果是已有章节，重新进入对话模式，恢复历史记录
+    planChatActive.value = true
+    const chatHistory = currentChapter.value.plan_chat_messages || []
+    console.log('恢复聊天记录:', chatHistory)
+    planChatMessages.value = chatHistory
+    planCompleted.value = !!currentChapter.value.plan  // 如果已有 plan，标记为完成
+    currentPlanData.value = currentChapter.value.plan_data || null  // 恢复结构化数据
+    currentPlanChapterId.value = currentChapter.value.id
+    newChapterNumber.value = currentChapter.value.chapter_number
+    
+    // 如果有大纲数据，自动打开预览
+    if (currentPlanData.value) {
+      showPlanPreview.value = true
+    }
+    
+    message.info(`已恢复对话历史 (${chatHistory.length} 条消息)`)
   }
 }
 
 async function handleGenerate() {
   try {
+    message.loading('正在生成内容...', { duration: 0, key: 'generating' })
     await genStore.generateContent(currentChapter.value.id)
-    message.success('内容生成成功')
+    message.destroyAll()
+    message.success('内容生成成功', { duration: 3000 })
   } catch (error) {
-    message.error('生成失败: ' + error.message)
+    message.destroyAll()
+    message.error('生成失败: ' + error.message, { duration: 5000 })
   }
 }
 
 async function handleVerify() {
   try {
+    message.loading('正在验证内容...', { duration: 0, key: 'verifying' })
     const result = await genStore.verifyContent(currentChapter.value.id)
+    message.destroyAll()
     if (result.passed) {
-      message.success('验证通过')
+      message.success('验证通过', { duration: 3000 })
     } else {
-      message.warning('验证未通过，请查看问题并改进')
+      message.warning('验证未通过，请查看问题并改进', { duration: 5000 })
     }
   } catch (error) {
-    message.error('验证失败: ' + error.message)
+    message.destroyAll()
+    message.error('验证失败: ' + error.message, { duration: 5000 })
   }
 }
 
 async function handleImprove() {
   try {
+    message.loading('正在改进内容...', { duration: 0, key: 'improving' })
     await genStore.improveContent(currentChapter.value.id)
-    message.success('内容已改进，请重新验证')
+    message.destroyAll()
+    message.success('内容已改进，请重新验证', { duration: 3000 })
   } catch (error) {
-    message.error('改进失败: ' + error.message)
+    message.destroyAll()
+    message.error('改进失败: ' + error.message, { duration: 5000 })
   }
 }
 
 async function handleFinalize() {
   try {
+    message.loading('正在确认章节...', { duration: 0, key: 'finalizing' })
     await genStore.finalizeChapter(currentChapter.value.id)
     await workspaceStore.loadChapters(workspaceId.value)
-    message.success('章节已完成')
+    message.destroyAll()
+    message.success('章节已完成', { duration: 3000 })
   } catch (error) {
-    message.error('确认失败: ' + error.message)
+    message.destroyAll()
+    message.error('确认失败: ' + error.message, { duration: 5000 })
   }
 }
 
@@ -1282,6 +1386,32 @@ async function handleChapterAction(key, chapter) {
           }
         } catch (error) {
           message.error('回退失败: ' + error.message)
+        }
+      }
+    })
+    return
+  }
+  
+  if (key === 'delete') {
+    dialog.error({
+      title: '确认删除',
+      content: `确定要删除第${chapter.chapter_number}章吗？此操作不可恢复。`,
+      positiveText: '删除',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        try {
+          await chapterAPI.delete(chapter.id)
+          message.success('删除成功')
+          
+          // 刷新章节列表
+          await workspaceStore.loadChapters(workspaceId.value)
+          
+          // 如果删除的是当前章节，清空当前章节
+          if (currentChapter.value?.id === chapter.id) {
+            genStore.currentChapter = null
+          }
+        } catch (error) {
+          message.error('删除失败: ' + error.message)
         }
       }
     })
@@ -1879,6 +2009,25 @@ async function saveSystemConfig() {
   }
 }
 
+/* 对话视图滑入动画 */
+.slide-fade-enter-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.slide-fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.5, 0, 0.75, 0);
+}
+
+.slide-fade-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+.slide-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
 /* Plan Chat View - VSCode交互式窗口风格 */
 .plan-chat-view {
   height: 100%;
@@ -1934,7 +2083,18 @@ async function saveSystemConfig() {
 .chat-message {
   display: flex;
   gap: 10px;
-  animation: fadeIn 0.2s ease-out;
+  animation: messageFadeIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes messageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .message-avatar {
@@ -2043,12 +2203,14 @@ async function saveSystemConfig() {
   line-height: 1.6;
   padding: 8px 12px;
   border-radius: 2px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .edit-input :deep(.n-input__textarea-el):focus {
   border-color: rgba(102, 126, 234, 0.6);
   background: rgba(255, 255, 255, 0.08);
   outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
 }
 
 .edit-actions {
@@ -2068,6 +2230,18 @@ async function saveSystemConfig() {
   color: rgba(99, 226, 183, 0.95);
   font-size: 13px;
   font-weight: 500;
+  animation: bannerSlideDown 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bannerSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .plan-completed-banner svg {
@@ -2076,6 +2250,15 @@ async function saveSystemConfig() {
 
 .plan-completed-banner span {
   flex: 1;
+}
+
+.plan-completed-banner .n-button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.plan-completed-banner .n-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(99, 226, 183, 0.4);
 }
 
 .plan-chat-input {
@@ -2107,12 +2290,14 @@ async function saveSystemConfig() {
   line-height: 1.6;
   padding: 8px 12px;
   border-radius: 2px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-input :deep(.n-input__textarea-el):focus {
   border-color: rgba(102, 126, 234, 0.5);
   background: rgba(255, 255, 255, 0.06);
   outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .input-actions {
@@ -2125,6 +2310,19 @@ async function saveSystemConfig() {
 .input-hint {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
+}
+
+.input-actions .n-button {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.input-actions .n-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.input-actions .n-button:active {
+  transform: translateY(0);
 }
 
 /* 工作区内容样式 */
@@ -2394,6 +2592,113 @@ async function saveSystemConfig() {
 
 .workspace-fade-leave-to {
   opacity: 0;
+}
+
+/* Plan完成提示 - 居中悬浮 */
+.plan-completed-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  margin-top: 12px;
+  background: rgba(24, 160, 88, 0.08);
+  border-left: 2px solid #18a058;
+  border-radius: 2px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+}
+
+.plan-completed-hint .hint-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-completed-hint svg {
+  color: #18a058;
+  flex-shrink: 0;
+}
+
+.plan-completed-hint .hint-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Plan预览面板 - VSCode风格 */
+.plan-preview-content {
+  padding: 0;
+}
+
+.preview-field {
+  margin-bottom: 28px;
+}
+
+.preview-field:last-child {
+  margin-bottom: 0;
+}
+
+.preview-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+.preview-field-value {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.7;
+}
+
+.preview-field-value.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.preview-list {
+  margin: 0;
+  padding-left: 20px;
+  list-style: decimal;
+}
+
+.preview-list li {
+  margin-bottom: 12px;
+  padding-left: 8px;
+  line-height: 1.7;
+}
+
+.preview-list li:last-child {
+  margin-bottom: 0;
+}
+
+.preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-tag {
+  display: inline-block;
+  padding: 6px 14px;
+  background: rgba(102, 126, 234, 0.12);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.preview-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 </style>
 

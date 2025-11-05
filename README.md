@@ -35,10 +35,6 @@ cd backend
 # 安装依赖
 pip install -r requirements.txt
 
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入你的 OpenAI API Key
-
 # 启动后端
 python main.py
 ```
@@ -46,6 +42,8 @@ python main.py
 后端将运行在 `http://localhost:8000`
 
 API 文档: `http://localhost:8000/docs`
+
+**注意**: OpenAI API Key 等模型配置在前端界面的系统设置中配置，无需配置 .env 文件。
 
 ### 2. 前端设置
 

@@ -22,7 +22,7 @@ class WorkspaceService:
             plugin_states={}
         )
         db.add(workspace)
-        await db.flush()
+        await db.commit()
         await db.refresh(workspace)
         return workspace
     
@@ -65,7 +65,7 @@ class WorkspaceService:
         if data.config is not None:
             workspace.config = data.config
         
-        await db.flush()
+        await db.commit()
         await db.refresh(workspace)
         return workspace
     
@@ -77,6 +77,6 @@ class WorkspaceService:
             return False
         
         await db.delete(workspace)
-        await db.flush()
+        await db.commit()
         return True
 

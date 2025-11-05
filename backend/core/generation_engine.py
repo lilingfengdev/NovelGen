@@ -52,11 +52,16 @@ class GenerationEngine:
         ws_config = workspace.config if workspace else {}
         
         # 基础配置 - model 优先级：参数 > workspace配置 > 系统配置 > 默认配置
-        effective_model = model or ws_config.get("model") or sys_settings.openai_model or settings.openai_model
+        effective_model = model or ws_config.get("model") or sys_settings.openai_model or settings.openai_model or "gpt-4-turbo-preview"
+        
+        # 检查 API Key
+        api_key = sys_settings.openai_api_key or settings.openai_api_key
+        if not api_key:
+            raise ValueError("未配置 OpenAI API Key。请在系统设置中配置后再使用生成功能。")
         
         kwargs = {
             "model": effective_model,
-            "openai_api_key": sys_settings.openai_api_key or settings.openai_api_key,
+            "openai_api_key": api_key,
         }
         
         # 只在workspace配置了生成参数时才传递，避免不支持的后端报错
@@ -102,7 +107,7 @@ class GenerationEngine:
             "plot_points": (List[str], "主要情节点列表"),
             "characters": (List[str], "涉及的角色列表"),
             "direction": (str, "情节推进方向"),
-            "scenes": (str, "重要场景描述"),
+            "scenes": (List[str], "重要场景描述列表"),
         }
         
         # 合并插件扩展的参数
@@ -113,14 +118,21 @@ class GenerationEngine:
             all_params[param_name] = (param_type, param_desc)
         
         # 动态构建函数
-        def create_plan_func(**kwargs) -> str:
+        def create_plan(**kwargs) -> str:
             """创建章节大纲"""
             # 构建基础内容
             title = kwargs.get("title", "未命名")
             plot_points = kwargs.get("plot_points", [])
             characters = kwargs.get("characters", [])
             direction = kwargs.get("direction", "")
-            scenes = kwargs.get("scenes", "")
+            scenes = kwargs.get("scenes", [])
+            
+            # 格式化场景列表
+            scenes_text = ""
+            if isinstance(scenes, list):
+                scenes_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(scenes)])
+            else:
+                scenes_text = str(scenes)
             
             plan_content = f"""# {title}
 
@@ -134,7 +146,7 @@ class GenerationEngine:
 {direction}
 
 ## 重要场景
-{scenes}
+{scenes_text}
 """
             
             # 添加插件扩展的内容
@@ -163,17 +175,17 @@ class GenerationEngine:
         doc_parts = ["创建章节大纲\n\nArgs:"]
         for param_name, (param_type, param_desc) in all_params.items():
             doc_parts.append(f"    {param_name}: {param_desc}")
-        create_plan_func.__doc__ = "\n".join(doc_parts)
+        create_plan.__doc__ = "\n".join(doc_parts)
         
         # 设置注解（langchain 需要这个来理解参数类型）
         annotations = {}
         for param_name, (param_type, param_desc) in all_params.items():
             annotations[param_name] = param_type
         annotations["return"] = str
-        create_plan_func.__annotations__ = annotations
+        create_plan.__annotations__ = annotations
         
         # 用 @tool 装饰
-        return tool(create_plan_func)
+        return tool(create_plan)
     
     def _build_prompt(self, stage: str, base_system: str, base_user: str, context: Dict[str, Any]) -> List[BaseMessage]:
         """构建提示词，合并插件注入的内容
@@ -248,7 +260,7 @@ class GenerationEngine:
         prev_summary = ""
         if previous_chapters:
             prev_summary = "\n\n".join([
-                f"第{ch.chapter_number}章: {ch.title}\n{ch.plan[:200]}..."
+                f"第{ch.chapter_number}章: {ch.title}\n{ch.plan}..."
                 for ch in previous_chapters[-1:]  # 只注入最后一章
             ])
         
@@ -263,11 +275,13 @@ class GenerationEngine:
 3. 涉及的角色
 4. 情节推进方向
 5. 重要的场景描述
-比起快速推进主线，你倾向于长篇连载体裁的“慢叙事”。
-你注重通过组织“人”、“物”、“事”、“地”来细致展现世界，人物的欲望、行动和关系将在与“物、事、地”的互动和改造中自然浮现。
+你注重通过组织"人"、"物"、"事"、"地"来细致展现世界，人物的欲望、行动和关系将在与"物、事、地"的互动和改造中自然浮现。
 系统性地创造叙事，保持逻辑和结构连贯，符合小说整体风格。
 
-只有当你确认大纲完整且用户满意时，才调用 create_plan 工具。"""
+规则：
+- 初次规划时，当你确认大纲完整且用户满意时，调用 create_plan 工具创建大纲
+- 如果大纲已创建，用户提出修改意见，你应该根据反馈再次调用 create_plan 工具更新大纲
+- 每次创建或更新大纲后，询问用户是否还需要调整"""
         
         # 获取插件注入的提示词
         plugin_prompts = plugin_manager.merge_prompts("plan", ctx)
@@ -312,20 +326,12 @@ class GenerationEngine:
         result = {
             "messages": messages.copy(),
             "plan": None,
+            "plan_data": None,  # 结构化的 plan 数据
             "completed": False
         }
         
-        # 添加AI响应
-        ai_msg = {
-            "role": "assistant",
-            "content": response.content or "",
-        }
-        
         if response.tool_calls:
-            ai_msg["tool_calls"] = response.tool_calls
-            result["messages"].append(ai_msg)
-            
-            # 执行工具调用 - 让 langchain 自动处理
+            # 执行工具调用 - 后端内部处理，不暴露给前端
             for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
@@ -337,33 +343,86 @@ class GenerationEngine:
                         
                         # 如果是 create_plan，特殊处理
                         if tool_name == "create_plan":
+                            # 解析并确保返回的数据是正确的格式
+                            # 有些 LLM 可能把数组序列化成 JSON 字符串
+                            def parse_field(value):
+                                if isinstance(value, str):
+                                    # 尝试解析 JSON 字符串
+                                    try:
+                                        parsed = json.loads(value)
+                                        return parsed
+                                    except:
+                                        return value
+                                return value
+                            
+                            result["plan_data"] = {
+                                "title": tool_args.get("title", "未命名"),
+                                "plot_points": parse_field(tool_args.get("plot_points", [])),
+                                "characters": parse_field(tool_args.get("characters", [])),
+                                "direction": tool_args.get("direction", ""),
+                                "scenes": parse_field(tool_args.get("scenes", []))
+                            }
+                            
+                            # 从 plan_data 生成纯文本 plan
+                            title = result["plan_data"]["title"]
+                            plot_points = result["plan_data"]["plot_points"]
+                            characters = result["plan_data"]["characters"]
+                            direction = result["plan_data"]["direction"]
+                            scenes = result["plan_data"]["scenes"]
+                            
+                            # 格式化场景列表
+                            scenes_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(scenes)]) if isinstance(scenes, list) else str(scenes)
+                            
+                            plan_content = f"""# {title}
+
+## 主要情节点
+{chr(10).join([f"{i+1}. {p}" for i, p in enumerate(plot_points)])}
+
+## 涉及角色
+{', '.join(characters)}
+
+## 情节推进方向
+{direction}
+
+## 重要场景
+{scenes_text}
+"""
+                            
                             # 调用 after_plan hooks - 让插件可以修改 plan
                             hook_results = plugin_manager.call_hook(
                                 "hook_after_plan", 
-                                plan=tool_response, 
+                                plan=plan_content, 
                                 context=ctx
                             )
                             for hook_result in hook_results:
                                 if hook_result and isinstance(hook_result, str):
-                                    tool_response = hook_result
+                                    plan_content = hook_result
                             
-                            result["plan"] = tool_response
+                            result["plan"] = plan_content
                             result["completed"] = True
-                            tool_response = "大纲已创建"
+                            
+                            # 前端只看到"大纲已创建"，不知道 tool_calls
+                            result["messages"].append({
+                                "role": "assistant",
+                                "content": "好的，我已经为你创建了大纲。"
+                            })
                     except Exception as e:
-                        tool_response = f"工具执行失败: {str(e)}"
+                        # 工具执行失败，返回错误信息
+                        result["messages"].append({
+                            "role": "assistant",
+                            "content": f"创建大纲时出错：{str(e)}"
+                        })
                 else:
-                    tool_response = f"未找到工具: {tool_name}"
-                
-                # 添加工具响应消息
-                result["messages"].append({
-                    "role": "tool",
-                    "tool_call_id": tool_call["id"],
-                    "content": str(tool_response)
-                })
+                    result["messages"].append({
+                            "role": "assistant",
+                            "content": f"系统错误：找不到工具 {tool_name}"
+                    })
         else:
-            # 没有工具调用，继续对话
-            result["messages"].append(ai_msg)
+            # 没有工具调用，继续对话 - 只返回 AI 的文本回复
+            result["messages"].append({
+                "role": "assistant",
+                "content": response.content or ""
+            })
         
         return result
     

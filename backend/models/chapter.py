@@ -30,6 +30,7 @@ class Chapter(Base):
     
     # 生成过程数据
     plan = Column(Text, nullable=True, comment="章节大纲/计划")
+    plan_data = Column(JSON, nullable=True, comment="结构化的大纲数据")
     content = Column(Text, nullable=True, comment="章节内容")
     
     # 验证结果
@@ -43,7 +44,10 @@ class Chapter(Base):
     plugin_snapshot = Column(JSON, default=dict, comment="插件状态快照")
     
     # 生成历史 - 记录每次improve的历史版本
-    generation_history = Column(JSON, default=list, comment="生成历史记录")
+    generation_history = Column(JSON, default=lambda: [], comment="生成历史记录")
+    
+    # Plan 对话历史 - 保存对话式创建大纲的聊天记录
+    plan_chat_messages = Column(JSON, default=lambda: [], comment="Plan对话历史")
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
@@ -61,12 +65,14 @@ class Chapter(Base):
             "chapter_number": self.chapter_number,
             "title": self.title,
             "plan": self.plan,
+            "plan_data": self.plan_data,
             "content": self.content,
             "verification_result": self.verification_result,
             "verification_passed": self.verification_passed,
             "status": self.status.value if self.status else None,
             "plugin_snapshot": self.plugin_snapshot,
             "generation_history": self.generation_history,
+            "plan_chat_messages": self.plan_chat_messages if self.plan_chat_messages else [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

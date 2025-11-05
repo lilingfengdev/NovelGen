@@ -11,13 +11,17 @@ pip install -r requirements.txt
 
 ## 配置
 
-复制 `.env.example` 到 `.env` 并配置你的 OpenAI API Key：
+OpenAI API Key 等模型配置在前端界面的系统设置中配置，无需配置 .env 文件。
+
+如需自定义数据库路径、API端口等服务器配置，可创建 `.env` 文件：
 
 ```bash
-cp .env.example .env
+# 可选配置项
+DATABASE_URL=sqlite+aiosqlite:///./novelgen.db
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
-
-编辑 `.env` 文件，填入你的配置。
 
 ## 运行
 

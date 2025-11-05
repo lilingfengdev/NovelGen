@@ -49,12 +49,14 @@ class ChapterResponse(BaseModel):
     chapter_number: int
     title: Optional[str]
     plan: Optional[str]
+    plan_data: Optional[Dict[str, Any]]  # 结构化大纲数据
     content: Optional[str]
     verification_result: Optional[Dict[str, Any]]
     verification_passed: int
     status: str
     plugin_snapshot: Dict[str, Any]
     generation_history: List[Dict[str, Any]]
+    plan_chat_messages: List[Dict[str, Any]]  # Plan对话历史
     created_at: str
     updated_at: str
     completed_at: Optional[str]
@@ -91,8 +93,9 @@ class PlanInteractiveRequest(BaseModel):
 
 class PlanInteractiveResponse(BaseModel):
     """对话式Plan生成响应"""
-    messages: List[Dict[str, Any]] = Field(..., description="更新后的对话历史")
-    plan: Optional[str] = Field(None, description="生成的大纲（完成时才有）")
+    messages: List[Dict[str, Any]] = Field(..., description="更新后的对话历史（只包含 user 和 assistant 消息）")
+    plan: Optional[str] = Field(None, description="生成的大纲文本（完成时才有）")
+    plan_data: Optional[Dict[str, Any]] = Field(None, description="结构化的大纲数据（完成时才有）")
     completed: bool = Field(..., description="是否完成大纲创建")
     chapter_id: Optional[int] = Field(None, description="章节ID（完成时才有）")
 

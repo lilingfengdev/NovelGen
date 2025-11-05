@@ -62,4 +62,4 @@ Thumbs.db
 # Frontend
 frontend/.vite/
 frontend/dist/
-
+frontend/plugins.json

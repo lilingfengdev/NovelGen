@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.models.schemas import (
-    PlanRequest, PlanResponse,
     PlanInteractiveRequest, PlanInteractiveResponse,
     GenerateRequest, GenerateResponse,
     VerifyRequest, VerifyResponse,
@@ -13,30 +12,6 @@ from backend.models.schemas import (
 from backend.services.chapter_service import GenerationService
 
 router = APIRouter()
-
-
-@router.post("/plan", response_model=PlanResponse)
-async def create_plan(
-    data: PlanRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """生成章节大纲（Plan阶段）- 快速模式"""
-    try:
-        chapter = await GenerationService.execute_plan(
-            db=db,
-            workspace_id=data.workspace_id,
-            chapter_number=data.chapter_number,
-            user_input=data.user_input,
-            model=data.model
-        )
-        
-        return {
-            "chapter_id": chapter.id,
-            "plan": chapter.plan,
-            "status": chapter.status.value
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/plan/interactive", response_model=PlanInteractiveResponse)
@@ -57,6 +32,7 @@ async def create_plan_interactive(
         return {
             "messages": result["messages"],
             "plan": result.get("plan"),
+            "plan_data": result.get("plan_data"),
             "completed": result["completed"],
             "chapter_id": result.get("chapter_id")
         }

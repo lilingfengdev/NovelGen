@@ -7,10 +7,10 @@ from typing import Optional, Union
 class Settings(BaseSettings):
     """应用配置"""
     
-    # OpenAI配置
-    openai_api_key: str
+    # OpenAI配置 - 改为可选，由前端配置
+    openai_api_key: Optional[str] = None
     openai_base_url: Optional[str] = None  # 自定义API endpoint，支持代理/Azure/本地模型
-    openai_model: str = "gpt-4-turbo-preview"  # 默认模型，可被前端覆盖
+    openai_model: Optional[str] = None  # 默认模型，可被前端覆盖
     
     # 数据库配置
     database_url: str = "sqlite+aiosqlite:///./novelgen.db"
