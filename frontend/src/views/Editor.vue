@@ -106,7 +106,7 @@
               <n-button 
               text 
               size="tiny"
-              @click="startPlanChat"
+              @click="startNewChapter"
               class="new-chapter-icon-btn"
               >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -172,143 +172,10 @@
             
       <!-- 主内容区 -->
       <n-layout-content class="main-content">
-        <!-- 对话式创建章节 -->
         <transition name="slide-fade" mode="out-in">
-        <div v-if="planChatActive" key="plan-chat" class="plan-chat-view">
-          <div class="plan-chat-header">
-            <div class="header-title">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="12" y1="18" x2="12" y2="12"/>
-                <line x1="9" y1="15" x2="15" y2="15"/>
-              </svg>
-              <span>创建新章节：第{{ newChapterNumber }}章</span>
-            </div>
-            <n-button text size="small" @click="cancelPlanChat" class="close-btn">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </n-button>
-          </div>
-
-          <div class="plan-chat-messages" ref="messagesContainer">
-            <div 
-              v-for="(msg, idx) in planChatMessages" 
-              :key="idx"
-              :class="['chat-message', msg.role]"
-            >
-              <div class="message-avatar">{{ msg.role === 'user' ? 'U' : 'AI' }}</div>
-              <div class="message-bubble">
-                <div v-if="editingMessageIndex === idx" class="message-edit">
-                  <n-input
-                    v-model:value="editingMessageContent"
-                    type="textarea"
-                    :rows="3"
-                    autofocus
-                    class="edit-input"
-                  />
-                  <div class="edit-actions">
-                    <n-button size="tiny" @click="cancelEditMessage">取消</n-button>
-                    <n-button size="tiny" type="primary" @click="saveEditMessage(idx)">保存并重新生成</n-button>
-                  </div>
-                </div>
-                <div v-else class="message-content-wrapper">
-                  <div class="message-text">{{ msg.content }}</div>
-                  <div class="message-actions">
-                    <n-button 
-                      v-if="msg.role === 'user' && idx === planChatMessages.length - 2"
-                      text 
-                      size="tiny"
-                      @click="regenerateFromMessage(idx)"
-                      :disabled="planGenerating"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="1 4 1 10 7 10"></polyline>
-                        <polyline points="23 20 23 14 17 14"></polyline>
-                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
-                      </svg>
-                    </n-button>
-                    <n-button 
-                      v-if="msg.role === 'user'"
-                      text 
-                      size="tiny"
-                      @click="startEditMessage(idx, msg.content)"
-                      :disabled="planGenerating"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                      </svg>
-                    </n-button>
-                    <n-button 
-                      text 
-                      size="tiny"
-                      @click="deleteMessageFrom(idx)"
-                      :disabled="planGenerating"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                    </n-button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-if="planGenerating" class="chat-message assistant">
-              <div class="message-avatar">AI</div>
-              <div class="message-bubble">
-                <n-spin size="small" />
-                <span style="margin-left: 8px; color: rgba(255,255,255,0.5);">思考中...</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="planCompleted" style="text-align: center;">
-            <div class="plan-completed-hint">
-              <div class="hint-content">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-                <span>大纲已创建</span>
-              </div>
-              <div class="hint-actions">
-                <n-button text size="tiny" @click="showPlanPreview = true">预览</n-button>
-                <n-button text size="tiny" type="primary" @click="confirmPlanPreview">确认</n-button>
-              </div>
-            </div>
-          </div>
-
-          <div class="plan-chat-input">
-            <n-input
-              v-model:value="userMessage"
-              type="textarea"
-              placeholder="描述你的想法，或直接让 AI 开始创建..."
-              :rows="3"
-              :disabled="planGenerating"
-              @keydown.ctrl.enter="sendMessage"
-              class="chat-input"
-            />
-            <div class="input-actions">
-              <span class="input-hint">Ctrl+Enter 发送</span>
-              <n-button 
-                type="primary" 
-                size="small"
-                @click="sendMessage"
-                :loading="planGenerating"
-                :disabled="!userMessage.trim()"
-              >
-                发送
-              </n-button>
-            </div>
-          </div>
-        </div>
-        
         <!-- 空状态 -->
         <n-empty 
-          v-else-if="!currentChapter" 
+          v-if="!currentChapter" 
           key="empty-state"
           description="选择章节开始编辑"
           class="empty-state"
@@ -321,23 +188,19 @@
           </template>
         </n-empty>
         
-        <!-- 章节内容 -->
-        <chapter-content
+        <!-- 章节内容 - 分屏视图 -->
+        <split-chapter-view
           v-else
-          key="chapter-content"
+          key="split-chapter-view"
           :chapter="currentChapter"
-          :loading="genStore.loading"
-          :get-status-type="getStatusType"
-          :get-status-text="getStatusText"
-          @plan="handlePlan"
+          :workspace-id="workspaceId"
           @generate="handleGenerate"
-          @verify="handleVerify"
-          @improve="handleImprove"
           @finalize="handleFinalize"
+          @reload-chapter="handleReloadChapter"
         />
         </transition>
       </n-layout-content>
-        </n-layout>
+    </n-layout>
 
         <!-- 插件管理工作区 -->
         <n-layout-content v-else-if="activeWorkspace === 'plugins'" key="plugins" class="workspace-content">
@@ -714,62 +577,6 @@
       </n-layout>
     </n-layout>
 
-    <!-- Plan预览面板 - VSCode风格 -->
-    <n-drawer
-      v-model:show="showPlanPreview"
-      :width="500"
-      placement="right"
-      :trap-focus="false"
-      :block-scroll="false"
-    >
-      <n-drawer-content title="大纲预览" closable>
-        <div v-if="currentPlanData" class="plan-preview-content">
-          <div class="preview-field" v-if="currentPlanData.title">
-            <div class="preview-field-label">标题</div>
-            <div class="preview-field-value title">{{ currentPlanData.title }}</div>
-          </div>
-
-          <div class="preview-field" v-if="currentPlanData.plot_points && currentPlanData.plot_points.length">
-            <div class="preview-field-label">主要情节点</div>
-            <div class="preview-field-value">
-              <ol class="preview-list">
-                <li v-for="(point, idx) in currentPlanData.plot_points" :key="idx">{{ point }}</li>
-              </ol>
-            </div>
-          </div>
-
-          <div class="preview-field" v-if="currentPlanData.characters && currentPlanData.characters.length">
-            <div class="preview-field-label">涉及角色</div>
-            <div class="preview-field-value">
-              <div class="preview-tags">
-                <span v-for="char in currentPlanData.characters" :key="char" class="preview-tag">{{ char }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="preview-field" v-if="currentPlanData.direction">
-            <div class="preview-field-label">情节推进方向</div>
-            <div class="preview-field-value">{{ currentPlanData.direction }}</div>
-          </div>
-
-          <div class="preview-field" v-if="currentPlanData.scenes && currentPlanData.scenes.length">
-            <div class="preview-field-label">重要场景</div>
-            <div class="preview-field-value">
-              <ol class="preview-list">
-                <li v-for="(scene, idx) in currentPlanData.scenes" :key="idx">{{ scene }}</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-
-        <template #footer>
-          <div class="preview-footer">
-            <n-button @click="startOverPlan">重新规划</n-button>
-            <n-button type="primary" @click="confirmPlanPreview">确认并查看章节</n-button>
-          </div>
-        </template>
-      </n-drawer-content>
-    </n-drawer>
 
   </div>
 </template>
@@ -791,6 +598,7 @@ import { useGenerationStore } from '../stores/generation'
 import { pluginAPI, generationAPI, workspaceAPI, chapterAPI } from '../services/api'
 import PluginConfigForm from '../components/PluginConfigForm.vue'
 import ChapterContent from '../components/ChapterContent.vue'
+import SplitChapterView from '../components/SplitChapterView.vue'
 import { pluginManager } from '../plugins/manager'
 
 const route = useRoute()
@@ -804,27 +612,12 @@ const workspace = computed(() => workspaceStore.currentWorkspace)
 const chapters = computed(() => workspaceStore.chapters)
 const currentChapter = computed(() => genStore.currentChapter)
 
-const newChapterNumber = ref(1)
-
 // 工作区切换
 const activeWorkspace = ref('editor')
 
 // 二级Tab状态
 const activePluginTab = ref('')
 const activeSettingsTab = ref('model')
-
-// 对话式Plan状态
-const planChatActive = ref(false)
-const planChatMessages = ref([])
-const userMessage = ref('')
-const planGenerating = ref(false)
-const planCompleted = ref(false)
-const currentPlanData = ref(null)  // 结构化的plan数据
-const currentPlanChapterId = ref(null)
-const messagesContainer = ref(null)
-const editingMessageIndex = ref(null)
-const editingMessageContent = ref('')
-const showPlanPreview = ref(false)  // 显示Plan预览面板
 
 // 插件相关状态
 const availablePlugins = ref([])
@@ -931,7 +724,6 @@ onMounted(async () => {
     if (chapters.value.length > 0) {
       await genStore.loadChapter(chapters.value[chapters.value.length - 1].id)
     }
-    newChapterNumber.value = chapters.value.length + 1
     
     // 加载插件信息
     await loadPlugins()
@@ -1055,232 +847,55 @@ async function updatePluginConfig(pluginName, config) {
 async function selectChapter(chapterId) {
   try {
     await genStore.loadChapter(chapterId)
-    console.log('加载章节后的数据:', JSON.stringify(currentChapter.value, null, 2))
   } catch (error) {
     message.error('加载章节失败: ' + error.message)
   }
 }
 
-// 开始对话式规划
-async function startPlanChat() {
-  planChatActive.value = true
-  planChatMessages.value = []
-  planCompleted.value = false
-  currentPlanChapterId.value = null
-  newChapterNumber.value = chapters.value.length + 1
-}
-
-// 发送消息
-async function sendMessage() {
-  if (!userMessage.value.trim() || planGenerating.value) return
-  
-  planChatMessages.value.push({
-    role: 'user',
-    content: userMessage.value
-  })
-  
-  userMessage.value = ''
-  
-  // 自动滚动
-  setTimeout(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
-  }, 50)
-  
-  await continueChat()
-}
-
-// 继续对话
-async function continueChat() {
+async function startNewChapter() {
+  // 创建新章节
+  const newNumber = chapters.value.length + 1
   try {
-    planGenerating.value = true
-    
-    // 生成参数从 workspace.config 读取，不需要在请求中传递
-    const result = await generationAPI.planInteractive({
+    const { chapterAPI } = await import('../services/api')
+    const newChapter = await chapterAPI.create({
       workspace_id: workspaceId.value,
-      chapter_number: newChapterNumber.value,
-      messages: planChatMessages.value,
-      model: systemConfig.value.model || null
+      chapter_number: newNumber,
+      title: `第${newNumber}章`
     })
-    
-    // 更新消息历史
-    planChatMessages.value = result.messages
-    
-    // 保存章节ID（第一次返回时）
-    if (result.chapter_id && !currentPlanChapterId.value) {
-      currentPlanChapterId.value = result.chapter_id
-      // 刷新章节列表，显示新创建的章节
-      await workspaceStore.loadChapters(workspaceId.value)
-    }
-    
-    // 检查是否完成
-    if (result.completed) {
-      const isUpdate = planCompleted.value  // 判断是创建还是更新
-      planCompleted.value = true
-      currentPlanData.value = result.plan_data || null
-      showPlanPreview.value = true  // 打开预览面板
-      // 再次刷新以更新章节状态
-      await workspaceStore.loadChapters(workspaceId.value)
-      message.success(isUpdate ? '大纲已更新！' : '大纲创建完成！')
-    }
-  } catch (error) {
-    message.error('对话失败: ' + error.message)
-  } finally {
-    planGenerating.value = false
-  }
-}
-
-// 完成对话
-async function finishPlanChat() {
-  if (currentPlanChapterId.value) {
-    await genStore.loadChapter(currentPlanChapterId.value)
-    // 不重置对话状态，只是切换视图
-    planChatActive.value = false
-  } else {
-  resetPlanChat()
-  }
-}
-
-// 取消对话
-function cancelPlanChat() {
-  if (planCompleted.value) {
-    finishPlanChat()
-  } else {
-    resetPlanChat()
-  }
-}
-
-// 重置对话状态
-function resetPlanChat() {
-  planChatActive.value = false
-  planChatMessages.value = []
-  userMessage.value = ''
-  planGenerating.value = false
-  planCompleted.value = false
-  currentPlanData.value = null
-  currentPlanChapterId.value = null
-  editingMessageIndex.value = null
-  editingMessageContent.value = ''
-  newChapterNumber.value = chapters.value.length + 1
-  showPlanPreview.value = false
-}
-
-// 重新规划
-function startOverPlan() {
-  planCompleted.value = false
-  currentPlanData.value = null
-  planChatMessages.value = []
-  userMessage.value = ''
-  showPlanPreview.value = false
-}
-
-// 关闭预览并确认
-function confirmPlanPreview() {
-  showPlanPreview.value = false
-  finishPlanChat()
-}
-
-// 开始编辑消息
-function startEditMessage(index, content) {
-  editingMessageIndex.value = index
-  editingMessageContent.value = content
-}
-
-// 取消编辑消息
-function cancelEditMessage() {
-  editingMessageIndex.value = null
-  editingMessageContent.value = ''
-}
-
-// 保存编辑并重新生成
-async function saveEditMessage(index) {
-  if (!editingMessageContent.value.trim()) {
-    message.warning('消息内容不能为空')
-    return
-  }
-  
-  // 更新消息内容
-  planChatMessages.value[index].content = editingMessageContent.value
-  
-  // 删除该消息之后的所有消息
-  planChatMessages.value = planChatMessages.value.slice(0, index + 1)
-  
-  // 重置编辑状态
-  editingMessageIndex.value = null
-  editingMessageContent.value = ''
-  
-  // 重新生成
-  await continueChat()
-}
-
-// 删除消息及之后的所有消息
-function deleteMessageFrom(index) {
-  dialog.warning({
-    title: '确认删除',
-    content: '删除此消息后，之后的所有对话也会被删除。确定吗？',
-    positiveText: '确认',
-    negativeText: '取消',
-    onPositiveClick: () => {
-      planChatMessages.value = planChatMessages.value.slice(0, index)
-      message.success('已删除')
-    }
-  })
-}
-
-// 重新生成（从某条用户消息开始）
-async function regenerateFromMessage(index) {
-  // 删除该消息之后的所有消息
-  planChatMessages.value = planChatMessages.value.slice(0, index + 1)
-  
-  // 重新生成
-  await continueChat()
-}
-
-// 保留旧的快速创建方法（可选）
-async function handleCreateChapter() {
-  try {
-    await genStore.createPlan(
-      workspaceId.value,
-      newChapterNumber.value,
-      newChapterInput.value || null
-    )
     await workspaceStore.loadChapters(workspaceId.value)
-    showNewChapterModal.value = false
-    newChapterInput.value = ''
-    newChapterNumber.value = chapters.value.length + 1
-    message.success('大纲生成成功')
+    await genStore.loadChapter(newChapter.id)
   } catch (error) {
-    message.error('创建失败: ' + error.message)
+    message.error('创建章节失败: ' + error.message)
   }
 }
 
-async function handlePlan() {
-  // 切换到对话界面生成大纲
-  if (currentChapter.value) {
-    // 如果是已有章节，重新进入对话模式，恢复历史记录
-    planChatActive.value = true
-    const chatHistory = currentChapter.value.plan_chat_messages || []
-    console.log('恢复聊天记录:', chatHistory)
-    planChatMessages.value = chatHistory
-    planCompleted.value = !!currentChapter.value.plan  // 如果已有 plan，标记为完成
-    currentPlanData.value = currentChapter.value.plan_data || null  // 恢复结构化数据
-    currentPlanChapterId.value = currentChapter.value.id
-    newChapterNumber.value = currentChapter.value.chapter_number
-    
-    // 如果有大纲数据，自动打开预览
-    if (currentPlanData.value) {
-      showPlanPreview.value = true
+
+
+async function handleReloadChapter() {
+  try {
+    // 重新加载章节列表和当前章节
+    await workspaceStore.loadChapters(workspaceId.value)
+    if (currentChapter.value) {
+      await genStore.loadChapter(currentChapter.value.id)
     }
-    
-    message.info(`已恢复对话历史 (${chatHistory.length} 条消息)`)
+  } catch (error) {
+    console.error('重新加载章节失败:', error)
   }
 }
 
 async function handleGenerate() {
   try {
     message.loading('正在生成内容...', { duration: 0, key: 'generating' })
-    await genStore.generateContent(currentChapter.value.id)
+    
+    const { generationAPI } = await import('../services/api')
+    await generationAPI.generate(
+      currentChapter.value.id,
+      workspaceId.value
+    )
+    
+    // 重新加载章节
+    await genStore.loadChapter(currentChapter.value.id)
+    
     message.destroyAll()
     message.success('内容生成成功', { duration: 3000 })
   } catch (error) {
@@ -1289,39 +904,17 @@ async function handleGenerate() {
   }
 }
 
-async function handleVerify() {
-  try {
-    message.loading('正在验证内容...', { duration: 0, key: 'verifying' })
-    const result = await genStore.verifyContent(currentChapter.value.id)
-    message.destroyAll()
-    if (result.passed) {
-      message.success('验证通过', { duration: 3000 })
-    } else {
-      message.warning('验证未通过，请查看问题并改进', { duration: 5000 })
-    }
-  } catch (error) {
-    message.destroyAll()
-    message.error('验证失败: ' + error.message, { duration: 5000 })
-  }
-}
-
-async function handleImprove() {
-  try {
-    message.loading('正在改进内容...', { duration: 0, key: 'improving' })
-    await genStore.improveContent(currentChapter.value.id)
-    message.destroyAll()
-    message.success('内容已改进，请重新验证', { duration: 3000 })
-  } catch (error) {
-    message.destroyAll()
-    message.error('改进失败: ' + error.message, { duration: 5000 })
-  }
-}
 
 async function handleFinalize() {
   try {
     message.loading('正在确认章节...', { duration: 0, key: 'finalizing' })
-    await genStore.finalizeChapter(currentChapter.value.id)
+    
+    const { generationAPI } = await import('../services/api')
+    await generationAPI.finalize(currentChapter.value.id)
+    
     await workspaceStore.loadChapters(workspaceId.value)
+    await genStore.loadChapter(currentChapter.value.id)
+    
     message.destroyAll()
     message.success('章节已完成', { duration: 3000 })
   } catch (error) {

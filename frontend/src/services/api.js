@@ -53,6 +53,7 @@ export const workspaceAPI = {
 
 // Chapter API
 export const chapterAPI = {
+  create: (data) => api.post('/chapters', data),
   list: (workspaceId, params) => api.get(`/workspace/${workspaceId}/chapters`, { params }),
   get: (id) => api.get(`/chapters/${id}`),
   delete: (id) => api.delete(`/chapters/${id}`),
@@ -61,11 +62,54 @@ export const chapterAPI = {
 
 // Generation API
 export const generationAPI = {
-  planInteractive: (data) => api.post('/plan/interactive', data),
-  generate: (data) => api.post('/generate', data),
-  verify: (data) => api.post('/verify', data),
-  improve: (data) => api.post('/improve', data),
-  finalize: (chapterId) => api.post(`/finalize/${chapterId}`)
+  // Plan Agent 对话（流式）
+  planChatStream: (workspaceId, chapterNumber, message, threadId = null, model = null) => {
+    const params = new URLSearchParams({
+      workspace_id: workspaceId,
+      chapter_number: chapterNumber,
+      message: message,
+      thread_id: threadId || '',
+      model: model || ''
+    })
+    return `/api/plan/chat/stream?${params}`
+  },
+  
+  // 获取聊天历史
+  getPlanHistory: (workspaceId, chapterNumber, threadId = null) => {
+    return api.get('/plan/history', {
+      params: {
+        workspace_id: workspaceId,
+        chapter_number: chapterNumber,
+        thread_id: threadId
+      }
+    })
+  },
+  
+  // 确认 Plan
+  confirmPlan: (chapterId) => {
+    return api.post('/plan/confirm', { chapter_id: chapterId })
+  },
+  
+  // 生成内容
+  generate: (chapterId, workspaceId, model = null) => {
+    return api.post('/generate', {
+      chapter_id: chapterId,
+      workspace_id: workspaceId,
+      model: model
+    })
+  },
+  
+  // 最终确认
+  finalize: (chapterId) => {
+    return api.post(`/finalize/${chapterId}`)
+  },
+  
+  // 获取章节完整内容（从 Store）
+  getChapterContent: (chapterId, workspaceId) => {
+    return api.get(`/chapter/${chapterId}/content`, {
+      params: { workspace_id: workspaceId }
+    })
+  }
 }
 
 // Plugin API

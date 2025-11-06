@@ -1,0 +1,7 @@
+{
+  "plugins": {
+    "export": true,
+    "word-count": true
+  }
+}
+

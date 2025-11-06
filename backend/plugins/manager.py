@@ -1,9 +1,10 @@
-"""插件管理器"""
+"""插件管理器 - 融合 Pluggy + AgentMiddleware"""
 import pluggy
 import importlib
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from langchain.agents.middleware import AgentMiddleware
 
 from backend.plugins.hookspec import NovelGenHookSpec
 
@@ -11,13 +12,23 @@ hookimpl = pluggy.HookimplMarker("novelgen")
 
 
 class PluginManager:
-    """插件管理器 - 负责加载、注册和调用插件"""
+    """插件管理器 - 融合 Pluggy + AgentMiddleware
+    
+    架构：
+    - 使用 Pluggy 管理插件发现、配置、生命周期
+    - 使用 AgentMiddleware 进行运行时集成
+    """
     
     def __init__(self):
+        # Pluggy 管理器
         self.pm = pluggy.PluginManager("novelgen")
         self.pm.add_hookspecs(NovelGenHookSpec)
+        
+        # 插件实例缓存
         self._plugins: Dict[str, Any] = {}
-        self._workspace_configs: Dict[int, Dict[str, Any]] = {}  # 工作空间配置缓存
+        
+        # 工作空间配置缓存
+        self._workspace_configs: Dict[int, Dict[str, Any]] = {}
         
     def load_plugins(self, plugin_dir: Optional[str] = None):
         """加载插件
@@ -48,7 +59,7 @@ class PluginManager:
                     attr = getattr(module, attr_name)
                     if isinstance(attr, type) and hasattr(attr, '__dict__'):
                         # 检查是否有 hookimpl 装饰的方法
-                        if any(hasattr(getattr(attr, method), 'novelgen_impl') 
+                        if any(hasattr(getattr(attr, method, None), 'novelgen_impl') 
                                for method in dir(attr) if not method.startswith('_')):
                             plugin_instance = attr()
                             self.pm.register(plugin_instance, name=attr_name)
@@ -56,6 +67,8 @@ class PluginManager:
                             print(f"✓ 加载插件: {attr_name}")
             except Exception as e:
                 print(f"✗ 加载插件失败 {file.name}: {e}")
+                import traceback
+                traceback.print_exc()
     
     def get_plugins(self) -> Dict[str, Any]:
         """获取所有已加载的插件"""
@@ -68,28 +81,30 @@ class PluginManager:
             plugin_name: 插件名称
             
         Returns:
-            插件信息字典，包含name, description, version, config_schema等
+            插件信息字典
         """
         plugin = self._plugins.get(plugin_name)
         if not plugin:
             return None
         
-        # 从插件类获取元数据
-        metadata = {
+        # 调用 hook_get_metadata
+        try:
+            metadata_results = self.pm.hook.hook_get_metadata()
+            # 找到对应插件的 metadata
+            for result in metadata_results:
+                if result and result.get("name") == plugin_name:
+                    return result
+        except Exception:
+            pass
+        
+        # 回退：从插件属性获取
+        return {
             "name": getattr(plugin, "name", plugin_name),
             "description": getattr(plugin, "description", "无描述"),
             "version": getattr(plugin, "version", "1.0.0"),
             "author": getattr(plugin, "author", "Unknown"),
+            "config_schema": {}
         }
-        
-        # 获取配置schema
-        config_schema = self.call_hook_first(
-            "hook_get_config_schema",
-        )
-        if config_schema:
-            metadata["config_schema"] = config_schema
-        
-        return metadata
     
     def get_plugins_list(self) -> List[Dict[str, Any]]:
         """获取所有插件的信息列表
@@ -138,8 +153,73 @@ class PluginManager:
         plugin_config = config.get(plugin_name, {})
         return plugin_config.get("enabled", True)  # 默认启用
     
+    # ============ 运行时集成 - AgentMiddleware ============
+    
+    def get_middlewares(self, workspace_id: Optional[int] = None) -> List[AgentMiddleware]:
+        """获取所有插件的 AgentMiddleware 实例
+        
+        Args:
+            workspace_id: 工作空间ID，如果提供则过滤禁用的插件
+            
+        Returns:
+            AgentMiddleware 列表
+        """
+        middlewares = []
+        middleware_results = self.pm.hook.hook_get_middleware()
+        
+        for plugin_name, middleware in zip(self._plugins.keys(), middleware_results):
+            if middleware is None:
+                continue
+            
+            # 检查插件是否启用
+            if workspace_id is not None and not self.is_plugin_enabled(workspace_id, plugin_name):
+                continue
+            
+            middlewares.append(middleware)
+        
+        return middlewares
+    
+    # ============ 扩展功能 ============
+    
+    def collect_api_routers(self) -> List[Dict[str, Any]]:
+        """收集所有插件注册的 API 路由
+        
+        Returns:
+            路由定义列表
+        """
+        router_defs = self.pm.hook.hook_register_api_routes()
+        all_routes: List[Dict[str, Any]] = []
+        
+        for item in router_defs:
+            if isinstance(item, list):
+                for r in item:
+                    if isinstance(r, dict) and "router" in r:
+                        all_routes.append(r)
+            elif isinstance(item, dict) and "router" in item:
+                all_routes.append(item)
+        
+        return all_routes
+    
+    def extend_create_plan_params(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """收集所有插件扩展的 create_plan 参数
+        
+        Args:
+            context: 上下文信息
+            
+        Returns:
+            合并后的参数定义
+        """
+        all_params = {}
+        param_defs = self.pm.hook.hook_extend_create_plan_params(context=context)
+        
+        for params in param_defs:
+            if isinstance(params, dict):
+                all_params.update(params)
+        
+        return all_params
+    
     def call_hook(self, hook_name: str, **kwargs) -> List[Any]:
-        """调用Hook并收集所有插件的返回值
+        """调用 Hook 并收集所有插件的返回值
         
         Args:
             hook_name: Hook名称
@@ -152,24 +232,11 @@ class PluginManager:
         if hook is None:
             return []
         
-        # 检查是否有workspace_id参数，如果有则过滤禁用的插件
-        workspace_id = kwargs.get('context', {}).get('workspace_id') if 'context' in kwargs else None
-        
         results = hook(**kwargs)
-        
-        # 如果有workspace_id，过滤掉被禁用的插件返回值
-        if workspace_id is not None:
-            filtered_results = []
-            for plugin_name, result in zip(self._plugins.keys(), results):
-                if self.is_plugin_enabled(workspace_id, plugin_name):
-                    filtered_results.append(result)
-            results = filtered_results
-        
-        # 过滤掉None值
         return [r for r in results if r is not None]
     
     def call_hook_first(self, hook_name: str, **kwargs) -> Optional[Any]:
-        """调用Hook并返回第一个非None结果
+        """调用 Hook 并返回第一个非 None 结果
         
         Args:
             hook_name: Hook名称
@@ -180,86 +247,6 @@ class PluginManager:
         """
         results = self.call_hook(hook_name, **kwargs)
         return results[0] if results else None
-    
-    def merge_prompts(self, stage: str, context: Dict[str, Any]) -> Dict[str, str]:
-        """合并所有插件注入的提示词
-        
-        Args:
-            stage: 当前阶段
-            context: 上下文信息
-            
-        Returns:
-            {"system": "...", "user": "..."}
-        """
-        system_prompts = self.call_hook("hook_inject_system_prompt", stage=stage, context=context)
-        user_prompts = self.call_hook("hook_inject_user_prompt", stage=stage, context=context)
-        
-        return {
-            "system": "\n\n".join(system_prompts) if system_prompts else "",
-            "user": "\n\n".join(user_prompts) if user_prompts else ""
-        }
-    
-    def collect_tools(self, stage: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """收集所有插件注入的工具
-        
-        Args:
-            stage: 当前阶段
-            context: 上下文信息
-            
-        Returns:
-            工具列表
-        """
-        tools_lists = self.call_hook("hook_inject_tools", stage=stage, context=context)
-        # 扁平化工具列表
-        all_tools = []
-        for tools in tools_lists:
-            if isinstance(tools, list):
-                all_tools.extend(tools)
-        return all_tools
-    
-    def collect_api_routers(self) -> List[Dict[str, Any]]:
-        """收集所有插件注册的API路由
-        
-        Returns:
-            路由定义列表，每项包含：{"router": APIRouter, "prefix": str, "tags": List[str]}
-        """
-        router_defs = self.call_hook("hook_register_api_routes")
-        all_routes: List[Dict[str, Any]] = []
-        for item in router_defs:
-            if isinstance(item, list):
-                for r in item:
-                    if isinstance(r, dict) and "router" in r:
-                        all_routes.append(r)
-            elif isinstance(item, dict) and "router" in item:
-                all_routes.append(item)
-        return all_routes
-    
-    def collect_plugin_states(self, workspace_id: int) -> Dict[str, Any]:
-        """收集所有插件的状态（用于保存到Chapter）
-        
-        Args:
-            workspace_id: 工作区ID
-            
-        Returns:
-            {"plugin_name": state_dict, ...}
-        """
-        states = {}
-        for plugin_name, plugin in self._plugins.items():
-            state = self.call_hook_first("hook_get_plugin_state", workspace_id=workspace_id)
-            if state:
-                states[plugin_name] = state
-        return states
-    
-    def restore_plugin_states(self, workspace_id: int, states: Dict[str, Any]):
-        """恢复所有插件的状态（从Chapter加载）
-        
-        Args:
-            workspace_id: 工作区ID
-            states: 状态字典
-        """
-        for plugin_name, state in states.items():
-            if plugin_name in self._plugins:
-                self.call_hook("hook_set_plugin_state", workspace_id=workspace_id, state=state)
 
 
 # 全局插件管理器实例

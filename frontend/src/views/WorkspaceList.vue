@@ -95,7 +95,7 @@
           </n-empty>
           
           <transition-group v-else name="card-list" tag="div">
-            <n-grid :cols="gridCols" :x-gap="24" :y-gap="24" responsive="screen">
+            <n-grid key="workspace-grid" :cols="gridCols" :x-gap="24" :y-gap="24" responsive="screen">
               <n-grid-item 
                 v-for="workspace in filteredWorkspaces" 
                 :key="workspace.id"

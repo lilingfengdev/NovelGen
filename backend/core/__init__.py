@@ -1,4 +1,5 @@
-"""核心逻辑模块"""
-from backend.core.generation_engine import GenerationEngine, generation_engine
+"""Core module"""
+from backend.core.generation_engine import generation_engine
+from backend.core.store_manager import store_manager
 
-__all__ = ["GenerationEngine", "generation_engine"]
+__all__ = ["generation_engine", "store_manager"]

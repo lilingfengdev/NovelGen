@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.chapter import Chapter, ChapterStatus
 from backend.core.generation_engine import generation_engine
-from backend.plugins.manager import plugin_manager
 
 
 class ChapterService:
@@ -82,6 +81,14 @@ class ChapterService:
         if not chapter:
             return False
         
+        # 清理 LangGraph 历史记录
+        from backend.core.store_manager import StoreManager
+        await StoreManager.cleanup_chapter_history(
+            chapter.workspace_id,
+            chapter.chapter_number
+        )
+        
+        # 删除数据库记录
         await db.delete(chapter)
         await db.commit()
         return True
@@ -92,7 +99,10 @@ class ChapterService:
         workspace_id: int,
         chapter_id: int
     ) -> bool:
-        """回退到指定章节（删除之后的所有章节，恢复插件状态）"""
+        """回退到指定章节（删除之后的所有章节）
+        
+        注意：插件状态现在由 LangGraph Store 管理，不需要手动恢复
+        """
         chapter = await ChapterService.get_chapter(db, chapter_id)
         if not chapter or chapter.workspace_id != workspace_id:
             return False
@@ -104,12 +114,16 @@ class ChapterService:
             .where(Chapter.chapter_number > chapter.chapter_number)
         )
         later_chapters = result.scalars().all()
-        for ch in later_chapters:
-            await db.delete(ch)
         
-        # 恢复插件状态
-        if chapter.plugin_snapshot:
-            plugin_manager.restore_plugin_states(workspace_id, chapter.plugin_snapshot)
+        from backend.core.store_manager import StoreManager
+        
+        for ch in later_chapters:
+            # 清理每个章节的 LangGraph 历史记录
+            await StoreManager.cleanup_chapter_history(
+                ch.workspace_id,
+                ch.chapter_number
+            )
+            await db.delete(ch)
         
         await db.commit()
         return True

@@ -1,27 +1,29 @@
-"""生成引擎核心 - 实现 Plan -> Generate -> Verify -> Improve -> Update 流程"""
-from typing import Dict, Any, Optional, List, Callable
+"""生成引擎 - 基于 DeepAgent"""
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import json
 
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from deepagents import create_deep_agent
+from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
 
 from backend.config import settings
-from backend.plugins.manager import plugin_manager
 from backend.models.chapter import Chapter, ChapterStatus
 from backend.models.settings import SystemSettings
 from backend.models.workspace import Workspace
+from backend.core.store_manager import StoreManager
+from backend.core.tools import create_plan_tool_factory, ToolContext
+from backend.plugins.manager import plugin_manager
 
 
 class GenerationEngine:
-    """生成引擎 - 核心生成逻辑"""
+    """DeepAgent 生成引擎 - Plan Agent + Writer SubAgent"""
     
     def __init__(self):
-        """初始化生成引擎，不预创建LLM实例"""
+        """初始化引擎"""
         pass
     
     async def _get_llm(
@@ -30,7 +32,7 @@ class GenerationEngine:
         workspace_id: int,
         model: Optional[str] = None
     ) -> ChatOpenAI:
-        """获取LLM实例，从workspace配置读取生成参数
+        """获取LLM实例，从workspace配置读取参数
         
         Args:
             db: 数据库会话
@@ -51,7 +53,7 @@ class GenerationEngine:
         workspace = ws_result.scalar_one_or_none()
         ws_config = workspace.config if workspace else {}
         
-        # 基础配置 - model 优先级：参数 > workspace配置 > 系统配置 > 默认配置
+        # 基础配置
         effective_model = model or ws_config.get("model") or sys_settings.openai_model or settings.openai_model or "gpt-4-turbo-preview"
         
         # 检查 API Key
@@ -64,210 +66,51 @@ class GenerationEngine:
             "openai_api_key": api_key,
         }
         
-        # 只在workspace配置了生成参数时才传递，避免不支持的后端报错
+        # 只在workspace配置了生成参数时才传递
         if "temperature" in ws_config:
             kwargs["temperature"] = ws_config["temperature"]
         if "max_tokens" in ws_config:
             kwargs["max_tokens"] = ws_config["max_tokens"]
         if "top_p" in ws_config:
             kwargs["top_p"] = ws_config["top_p"]
-        if "frequency_penalty" in ws_config:
-            kwargs["frequency_penalty"] = ws_config["frequency_penalty"]
-        if "presence_penalty" in ws_config:
-            kwargs["presence_penalty"] = ws_config["presence_penalty"]
-        if "logit_bias" in ws_config:
-            kwargs["logit_bias"] = ws_config["logit_bias"]
         
-        # 如果配置了自定义base_url，添加到参数中
+        # base_url
         base_url = sys_settings.openai_base_url or settings.openai_base_url
         if base_url:
             kwargs["base_url"] = base_url
         
-        # 注意: top_k langchain的ChatOpenAI不直接支持，需要通过model_kwargs传递
-        if "top_k" in ws_config:
-            kwargs["model_kwargs"] = {"top_k": ws_config["top_k"]}
-        
         return ChatOpenAI(**kwargs)
     
-    def _build_create_plan_tool(self, extra_params: Dict[str, Any]):
-        """动态构建 create_plan 工具，支持插件扩展参数
-        
-        Args:
-            extra_params: 插件提供的额外参数定义
-            
-        Returns:
-            create_plan 工具
-        """
-        from typing import Annotated
-        import inspect
-        
-        # 基础参数
-        base_params = {
-            "title": (str, "章节标题"),
-            "plot_points": (List[str], "主要情节点列表"),
-            "characters": (List[str], "涉及的角色列表"),
-            "direction": (str, "情节推进方向"),
-            "scenes": (List[str], "重要场景描述列表"),
-        }
-        
-        # 合并插件扩展的参数
-        all_params = base_params.copy()
-        for param_name, param_def in extra_params.items():
-            param_type = param_def.get("type", str)
-            param_desc = param_def.get("description", param_name)
-            all_params[param_name] = (param_type, param_desc)
-        
-        # 动态构建函数
-        def create_plan(**kwargs) -> str:
-            """创建章节大纲"""
-            # 构建基础内容
-            title = kwargs.get("title", "未命名")
-            plot_points = kwargs.get("plot_points", [])
-            characters = kwargs.get("characters", [])
-            direction = kwargs.get("direction", "")
-            scenes = kwargs.get("scenes", [])
-            
-            # 格式化场景列表
-            scenes_text = ""
-            if isinstance(scenes, list):
-                scenes_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(scenes)])
-            else:
-                scenes_text = str(scenes)
-            
-            plan_content = f"""# {title}
-
-## 主要情节点
-{chr(10).join([f"{i+1}. {p}" for i, p in enumerate(plot_points)])}
-
-## 涉及角色
-{', '.join(characters)}
-
-## 情节推进方向
-{direction}
-
-## 重要场景
-{scenes_text}
-"""
-            
-            # 添加插件扩展的内容
-            for param_name in extra_params.keys():
-                if param_name in kwargs and kwargs[param_name]:
-                    value = kwargs[param_name]
-                    # 格式化输出
-                    if isinstance(value, list):
-                        value_str = "\n".join([f"- {v}" for v in value])
-                    elif isinstance(value, dict):
-                        value_str = "\n".join([f"- {k}: {v}" for k, v in value.items()])
-                    else:
-                        value_str = str(value)
-                    
-                    param_desc = extra_params[param_name].get("description", param_name)
-                    plan_content += f"\n## {param_desc}\n{value_str}\n"
-            
-            return plan_content
-        
-        # 设置函数签名（用于 langchain 的工具描述）
-        params_list = []
-        for param_name, (param_type, param_desc) in all_params.items():
-            params_list.append(f"{param_name}: {param_type.__name__}")
-        
-        # 构建文档字符串
-        doc_parts = ["创建章节大纲\n\nArgs:"]
-        for param_name, (param_type, param_desc) in all_params.items():
-            doc_parts.append(f"    {param_name}: {param_desc}")
-        create_plan.__doc__ = "\n".join(doc_parts)
-        
-        # 设置注解（langchain 需要这个来理解参数类型）
-        annotations = {}
-        for param_name, (param_type, param_desc) in all_params.items():
-            annotations[param_name] = param_type
-        annotations["return"] = str
-        create_plan.__annotations__ = annotations
-        
-        # 用 @tool 装饰
-        return tool(create_plan)
-    
-    def _build_prompt(self, stage: str, base_system: str, base_user: str, context: Dict[str, Any]) -> List[BaseMessage]:
-        """构建提示词，合并插件注入的内容
-        
-        Args:
-            stage: 当前阶段
-            base_system: 基础系统提示词
-            base_user: 基础用户提示词
-            context: 上下文
-            
-        Returns:
-            消息列表
-        """
-        # 获取插件注入的提示词
-        plugin_prompts = plugin_manager.merge_prompts(stage, context)
-        
-        # 合并系统提示词
-        system_prompt = base_system
-        if plugin_prompts["system"]:
-            system_prompt += f"\n\n{plugin_prompts['system']}"
-        
-        # 合并用户提示词
-        user_prompt = base_user
-        if plugin_prompts["user"]:
-            user_prompt += f"\n\n{plugin_prompts['user']}"
-        
-        # 构建消息
-        messages = [
-            SystemMessagePromptTemplate.from_template(system_prompt).format(),
-            HumanMessagePromptTemplate.from_template(user_prompt).format(**context)
-        ]
-        
-        return messages
-    
-    async def plan(
+    async def create_plan_agent(
         self,
         db: AsyncSession,
         workspace_id: int,
         chapter_number: int,
-        messages: List[Dict[str, Any]],
-        previous_chapters: Optional[List[Chapter]] = None,
-        model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """对话式生成章节大纲 - 支持工具调用和多轮对话
+        model: Optional[str] = None
+    ):
+        """创建 Plan Agent
         
         Args:
+            db: 数据库会话
             workspace_id: 工作区ID
             chapter_number: 章节号
-            messages: 对话历史
-            previous_chapters: 之前的章节
             model: 模型名称
-            context: 额外上下文
             
         Returns:
-            {"messages": [...], "plan": "...", "completed": bool}
+            Plan Agent 实例
         """
-        ctx = context or {}
-        ctx.update({
-            "workspace_id": workspace_id,
-            "chapter_number": chapter_number,
-            "previous_chapters": previous_chapters or []
-        })
+        # 获取 LLM
+        llm = await self._get_llm(db, workspace_id, model)
         
-        # 调用 before_plan hooks
-        hook_results = plugin_manager.call_hook("hook_before_plan", context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, dict):
-                ctx.update(result)
+        # 获取 checkpointer 和 store
+        checkpointer, store = await StoreManager.get_or_create(workspace_id)
         
         # 构建系统提示词
-        prev_summary = ""
-        if previous_chapters:
-            prev_summary = "\n\n".join([
-                f"第{ch.chapter_number}章: {ch.title}\n{ch.plan}..."
-                for ch in previous_chapters[-1:]  # 只注入最后一章
-            ])
-        
         system_prompt = f"""你是一个专业的小说大纲规划师。你需要和用户对话，根据他们的要求规划第{chapter_number}章的大纲。
 
-之前的章节：
-{prev_summary if prev_summary else "这是第一章"}
+其他章节存放在 `/memories/chapters/` 目录,在开始编写大纲前,请使用工具收集足够的信息
+
+## 大纲要求
 
 大纲应该包含：
 1. 章节标题
@@ -275,196 +118,37 @@ class GenerationEngine:
 3. 涉及的角色
 4. 情节推进方向
 5. 重要的场景描述
+
 你注重通过组织"人"、"物"、"事"、"地"来细致展现世界，人物的欲望、行动和关系将在与"物、事、地"的互动和改造中自然浮现。
 系统性地创造叙事，保持逻辑和结构连贯，符合小说整体风格。
 
-规则：
-- 初次规划时，当你确认大纲完整且用户满意时，调用 create_plan 工具创建大纲
-- 如果大纲已创建，用户提出修改意见，你应该根据反馈再次调用 create_plan 工具更新大纲
-- 每次创建或更新大纲后，询问用户是否还需要调整"""
-        
-        # 获取插件注入的提示词
-        plugin_prompts = plugin_manager.merge_prompts("plan", ctx)
-        if plugin_prompts["system"]:
-            system_prompt += f"\n\n{plugin_prompts['system']}"
-        
-        # 收集插件扩展的 create_plan 参数
-        extra_params_results = plugin_manager.call_hook("hook_extend_create_plan_params", context=ctx)
-        extra_params = {}
-        for result in extra_params_results:
-            if result and isinstance(result, dict):
-                extra_params.update(result)
-        
-        # 动态构建 create_plan 工具
-        create_plan = self._build_create_plan_tool(extra_params)
-        
-        # 收集插件工具
-        plugin_tools = plugin_manager.collect_tools("plan", ctx)
-        tools = [create_plan] + plugin_tools
-        
-        # 构建工具名称到工具对象的映射
-        tools_map = {tool.name: tool for tool in tools}
-        
-        # 构建消息列表
-        msg_list = [SystemMessage(content=system_prompt)]
-        for msg in messages:
-            if msg["role"] == "user":
-                msg_list.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                msg_list.append(AIMessage(content=msg.get("content", ""), 
-                                         tool_calls=msg.get("tool_calls", [])))
-            elif msg["role"] == "tool":
-                msg_list.append(ToolMessage(content=msg["content"], 
-                                           tool_call_id=msg["tool_call_id"]))
-        
-        # 调用LLM with tools
-        llm = await self._get_llm(db=db, workspace_id=workspace_id, model=model)
-        llm_with_tools = llm.bind_tools(tools)
-        response = await llm_with_tools.ainvoke(msg_list)
-        
-        # 处理响应
-        result = {
-            "messages": messages.copy(),
-            "plan": None,
-            "plan_data": None,  # 结构化的 plan 数据
-            "completed": False
-        }
-        
-        if response.tool_calls:
-            # 执行工具调用 - 后端内部处理，不暴露给前端
-            for tool_call in response.tool_calls:
-                tool_name = tool_call["name"]
-                tool_args = tool_call["args"]
-                
-                # 从映射中获取工具并执行
-                if tool_name in tools_map:
-                    try:
-                        tool_response = tools_map[tool_name].invoke(tool_args)
-                        
-                        # 如果是 create_plan，特殊处理
-                        if tool_name == "create_plan":
-                            # 解析并确保返回的数据是正确的格式
-                            # 有些 LLM 可能把数组序列化成 JSON 字符串
-                            def parse_field(value):
-                                if isinstance(value, str):
-                                    # 尝试解析 JSON 字符串
-                                    try:
-                                        parsed = json.loads(value)
-                                        return parsed
-                                    except:
-                                        return value
-                                return value
-                            
-                            result["plan_data"] = {
-                                "title": tool_args.get("title", "未命名"),
-                                "plot_points": parse_field(tool_args.get("plot_points", [])),
-                                "characters": parse_field(tool_args.get("characters", [])),
-                                "direction": tool_args.get("direction", ""),
-                                "scenes": parse_field(tool_args.get("scenes", []))
-                            }
-                            
-                            # 从 plan_data 生成纯文本 plan
-                            title = result["plan_data"]["title"]
-                            plot_points = result["plan_data"]["plot_points"]
-                            characters = result["plan_data"]["characters"]
-                            direction = result["plan_data"]["direction"]
-                            scenes = result["plan_data"]["scenes"]
-                            
-                            # 格式化场景列表
-                            scenes_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(scenes)]) if isinstance(scenes, list) else str(scenes)
-                            
-                            plan_content = f"""# {title}
+当大纲完整且用户满意时，**调用 create_plan 工具保存大纲** 如果用户提出修改意见，调整后再次调用 create_plan 更新
 
-## 主要情节点
-{chr(10).join([f"{i+1}. {p}" for i, p in enumerate(plot_points)])}
-
-## 涉及角色
-{', '.join(characters)}
-
-## 情节推进方向
-{direction}
-
-## 重要场景
-{scenes_text}
+create_plan 是保存大纲的唯一方式，其他文件操作用于参考和草稿。
 """
-                            
-                            # 调用 after_plan hooks - 让插件可以修改 plan
-                            hook_results = plugin_manager.call_hook(
-                                "hook_after_plan", 
-                                plan=plan_content, 
-                                context=ctx
-                            )
-                            for hook_result in hook_results:
-                                if hook_result and isinstance(hook_result, str):
-                                    plan_content = hook_result
-                            
-                            result["plan"] = plan_content
-                            result["completed"] = True
-                            
-                            # 前端只看到"大纲已创建"，不知道 tool_calls
-                            result["messages"].append({
-                                "role": "assistant",
-                                "content": "好的，我已经为你创建了大纲。"
-                            })
-                    except Exception as e:
-                        # 工具执行失败，返回错误信息
-                        result["messages"].append({
-                            "role": "assistant",
-                            "content": f"创建大纲时出错：{str(e)}"
-                        })
-                else:
-                    result["messages"].append({
-                            "role": "assistant",
-                            "content": f"系统错误：找不到工具 {tool_name}"
-                    })
-        else:
-            # 没有工具调用，继续对话 - 只返回 AI 的文本回复
-            result["messages"].append({
-                "role": "assistant",
-                "content": response.content or ""
-            })
         
-        return result
-    
-    async def generate(
-        self,
-        db: AsyncSession,
-        chapter: Chapter,
-        workspace_id: int,
-        previous_chapters: Optional[List[Chapter]] = None,
-        model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """生成章节内容
+        # 创建工具上下文（不传入 db，tool 内部自己创建 session）
+        tool_context = ToolContext(workspace_id=workspace_id)
         
-        Args:
-            chapter: 章节对象（包含plan）
-            workspace_id: 工作区ID
-            previous_chapters: 之前的章节
-            context: 额外上下文
-            
-        Returns:
-            生成的章节内容
-        """
-        ctx = context or {}
-        ctx.update({
-            "workspace_id": workspace_id,
-            "chapter": chapter,
-            "chapter_number": chapter.chapter_number,
-            "plan": chapter.plan,
-            "previous_chapters": previous_chapters or []
-        })
+        # 创建 create_plan 工具
+        create_plan = create_plan_tool_factory(tool_context)
         
-        # 调用 before_generate hooks - 所有插件链式修改上下文
-        hook_results = plugin_manager.call_hook("hook_before_generate", context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, dict):
-                ctx.update(result)
+        # 获取插件 middlewares
+        plugin_middlewares = plugin_manager.get_middlewares(workspace_id)
         
-        # 构建基础提示词
-        base_system = """你是一个专业的小说作家。你的任务是根据大纲生成详细的章节内容。
+        # Writer SubAgent 配置
+        writer_subagent = {
+            "name": "writer",
+            "description": "专业小说作家，负责根据大纲生成章节的具体内容。擅长细节描写和对话创作。",
+            "system_prompt": """你是一个专业的小说作家。你的任务是根据大纲生成详细的章节内容。
 
-要求：
+## 文件系统
+
+- `/memories/chapters/{{id}}.md` - 历史章节内容
+- `/` - 临时工作区
+
+## 要求
+
 1. 严格按照大纲展开情节
 2. 保持人物性格一致
 3. 细节描写生动
@@ -472,255 +156,276 @@ class GenerationEngine:
 5. 情节推进合理
 6. 字数适中（3000-5000字）
 
-注意保持与之前章节的连贯性。"""
+注意保持与之前章节的连贯性。
+""",
+            "tools": []  # 可以访问文件系统工具
+        }
         
-        # 构建用户提示词
-        prev_content = ""
-        if previous_chapters:
-            last_chapter = previous_chapters[-1]
-            prev_content = f"\n\n上一章结尾：\n{last_chapter.content[-500:] if last_chapter.content else ''}"
+        # 创建 Plan Agent（集成插件）
+        agent = create_deep_agent(
+            model=llm,
+            system_prompt=system_prompt,
+            tools=[create_plan],  # 只有 create_plan，其他都是内置工具
+            middleware=plugin_middlewares,  # 注入插件 middleware
+            backend=lambda rt: CompositeBackend(
+                default=StateBackend(rt),  # /workspace/* 临时文件
+                routes={
+                    "/memories/": StoreBackend(rt)  # /memories/* 持久化到 Store
+                }
+            ),
+            subagents=[writer_subagent],
+            checkpointer=checkpointer,
+            store=store,
+        )
         
-        base_user = f"""请根据以下大纲生成第{chapter.chapter_number}章的完整内容。
+        return agent
+    
+    async def plan_chat(
+        self,
+        db: AsyncSession,
+        workspace_id: int,
+        chapter_number: int,
+        message: str,
+        thread_id: Optional[str] = None,
+        model: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Plan Agent 对话（单次调用）
+        
+        Args:
+            db: 数据库会话
+            workspace_id: 工作区ID
+            chapter_number: 章节号
+            message: 用户消息
+            thread_id: 线程ID（用于恢复对话）
+            model: 模型名称
+            
+        Returns:
+            {
+                "messages": [...],  # 完整消息历史
+                "thread_id": "...",  # 线程ID
+                "plan_created": bool,  # 是否创建了大纲
+                "chapter_id": int | None  # 章节ID（如果创建了）
+            }
+        """
+        # 创建 Plan Agent
+        agent = await self.create_plan_agent(db, workspace_id, chapter_number, model)
+        
+        # 构建输入
+        input_data = {
+            "messages": [HumanMessage(content=message)]
+        }
+        
+        # 配置
+        config = {
+            "configurable": {
+                "thread_id": thread_id or f"plan_{workspace_id}_{chapter_number}",
+            }
+        }
+        
+        # 调用 Agent
+        result = await agent.ainvoke(input_data, config=config)
+        
+        # 解析结果
+        messages = result.get("messages", [])
+        
+        # 检查是否创建了大纲（通过检查数据库）
+        chapter_result = await db.execute(
+            select(Chapter).where(
+                Chapter.workspace_id == workspace_id,
+                Chapter.chapter_number == chapter_number
+            )
+        )
+        chapter = chapter_result.scalar_one_or_none()
+        
+        plan_created = chapter is not None and chapter.plan is not None
+        
+        return {
+            "messages": [
+                {"role": m.type, "content": m.content if hasattr(m, "content") else str(m)}
+                for m in messages
+            ],
+            "thread_id": config["configurable"]["thread_id"],
+            "plan_created": plan_created,
+            "chapter_id": chapter.id if chapter else None
+        }
+    
+    async def plan_chat_stream(
+        self,
+        db: AsyncSession,
+        workspace_id: int,
+        chapter_number: int,
+        message: str,
+        thread_id: Optional[str] = None,
+        model: Optional[str] = None
+    ):
+        """Plan Agent 流式对话（用于 SSE）
+        
+        Args:
+            db: 数据库会话
+            workspace_id: 工作区ID
+            chapter_number: 章节号
+            message: 用户消息
+            thread_id: 线程ID
+            model: 模型名称
+            
+        Yields:
+            流式事件
+        """
+        # 创建 Plan Agent
+        agent = await self.create_plan_agent(db, workspace_id, chapter_number, model)
+        
+        # 构建输入
+        input_data = {
+            "messages": [HumanMessage(content=message)]
+        }
+        
+        # 配置
+        config = {
+            "configurable": {
+                "thread_id": thread_id or f"plan_{workspace_id}_{chapter_number}",
+            }
+        }
+        
+        # 流式调用
+        async for event in agent.astream_events(input_data, config=config, version="v2"):
+            # 只传递关键事件
+            event_type = event.get("event")
+            
+            if event_type == "on_chat_model_stream":
+                # LLM 流式输出
+                chunk = event.get("data", {}).get("chunk")
+                if chunk and hasattr(chunk, "content") and chunk.content:
+                    yield {
+                        "type": "message_chunk",
+                        "content": chunk.content
+                    }
+            
+            elif event_type == "on_tool_start":
+                # 工具开始调用
+                tool_name = event.get("name")
+                yield {
+                    "type": "tool_start",
+                    "tool_name": tool_name
+                }
+            
+            elif event_type == "on_tool_end":
+                # 工具调用结束
+                tool_name = event.get("name")
+                output = event.get("data", {}).get("output")
+                
+                # 确保 output 可序列化
+                if output is not None:
+                    # 如果是 LangChain 消息对象，提取 content
+                    if hasattr(output, "content"):
+                        output = output.content
+                    # 如果是其他对象，转成字符串
+                    elif not isinstance(output, (str, int, float, bool, list, dict, type(None))):
+                        output = str(output)
+                
+                yield {
+                    "type": "tool_end",
+                    "tool_name": tool_name,
+                    "output": output
+                }
+    
+    async def generate_content(
+        self,
+        db: AsyncSession,
+        chapter_id: int,
+        workspace_id: int,
+        model: Optional[str] = None
+    ) -> str:
+        """使用 Writer SubAgent 生成章节内容
+        
+        Args:
+            db: 数据库会话
+            chapter_id: 章节ID
+            workspace_id: 工作区ID
+            model: 模型名称
+            
+        Returns:
+            生成的章节内容
+        """
+        # 查询章节
+        chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+        chapter = chapter_result.scalar_one_or_none()
+        if not chapter:
+            raise ValueError(f"Chapter {chapter_id} not found")
+        
+        if not chapter.plan:
+            raise ValueError("章节大纲不存在，请先创建大纲")
+        
+        # 创建 Plan Agent（包含 Writer SubAgent）
+        agent = await self.create_plan_agent(db, workspace_id, chapter.chapter_number, model)
+        
+        # 构建提示词，指示 Plan Agent 派发 Writer SubAgent
+        prompt = f"""现在请使用 task() 工具派发 writer 子任务，生成第{chapter.chapter_number}章的内容。
 
 章节大纲：
 {chapter.plan}
-{prev_content}
 
-请开始创作章节内容。"""
+要求：
+1. 使用 `read_file('/memories/chapters/*.md')` 读取历史章节
+2. 根据大纲生成 3000-5000 字的章节内容
+3. 使用 `write_file('/memories/chapters/{chapter_id}.md', content)` 保存内容
+"""
         
-        # 构建完整提示词
-        messages = self._build_prompt("generate", base_system, base_user, ctx)
+        # 配置
+        config = {
+            "configurable": {
+                "thread_id": f"generate_{workspace_id}_{chapter_id}",
+            }
+        }
         
-        # 收集工具（如果插件提供了）
-        tools = plugin_manager.collect_tools("generate", ctx)
+        # 调用 Agent，派发 Writer SubAgent
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content=prompt)]},
+            config=config
+        )
         
-        # 调用LLM
-        llm = await self._get_llm(db=db, workspace_id=workspace_id, model=model)
-        if tools:
-            # TODO: 实现工具调用逻辑
-            response = await llm.ainvoke(messages)
+        # 从 Store 读取生成的内容
+        _, store = await StoreManager.get_or_create(workspace_id)
+        
+        # 尝试从 Store 读取章节内容
+        stored_chapter = await store.aget(("memories", "chapters"), str(chapter_id))
+        
+        if stored_chapter and stored_chapter.value:
+            content = stored_chapter.value.get("content", "")
         else:
-            response = await llm.ainvoke(messages)
+            # 如果 Store 中没有，从 Agent 结果中提取
+            content = result.get("messages", [])[-1].content if result.get("messages") else ""
         
-        content = response.content
-        
-        # 调用 after_generate hooks - 所有插件链式修改content
-        hook_results = plugin_manager.call_hook("hook_after_generate", content=content, context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, str):
-                content = result
+        # 更新数据库中的章节状态
+        chapter.content = content[:500]  # 只存摘要
+        chapter.status = ChapterStatus.GENERATING
+        # 只 flush，不 commit，让外层（API）管理事务
+        await db.flush()
         
         return content
     
-    async def verify(
+    async def finalize_chapter(
         self,
         db: AsyncSession,
-        chapter: Chapter,
-        workspace_id: int,
-        model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """验证章节内容
-        
-        Args:
-            chapter: 章节对象
-            workspace_id: 工作区ID
-            context: 额外上下文
-            
-        Returns:
-            验证结果 {"passed": bool, "issues": [...], "suggestions": [...]}
-        """
-        ctx = context or {}
-        ctx.update({
-            "workspace_id": workspace_id,
-            "chapter": chapter,
-        })
-        
-        # 调用 before_verify hooks - 所有插件链式修改上下文
-        hook_results = plugin_manager.call_hook("hook_before_verify", context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, dict):
-                ctx.update(result)
-        
-        # 构建验证提示词
-        base_system = """你是一个专业的小说编辑。你的任务是检查章节内容的质量。
-
-检查项：
-1. 是否符合大纲
-2. 逻辑是否连贯
-3. 人物性格是否一致
-4. 是否有明显的情节漏洞
-5. 描写是否生动
-6. 对话是否自然
-
-请以JSON格式返回检查结果。"""
-        
-        base_user = f"""请检查以下章节内容：
-
-大纲：
-{chapter.plan}
-
-内容：
-{chapter.content}
-
-请返回JSON格式的检查结果：
-{{
-  "passed": true/false,
-  "issues": ["问题1", "问题2", ...],
-  "suggestions": ["建议1", "建议2", ...]
-}}"""
-        
-        messages = self._build_prompt("verify", base_system, base_user, ctx)
-        
-        # 调用LLM
-        llm = await self._get_llm(db=db, workspace_id=workspace_id, model=model)
-        response = await llm.ainvoke(messages)
-        
-        # 解析结果
-        try:
-            import json
-            # 尝试从response中提取JSON
-            content = response.content
-            # 查找JSON部分
-            start = content.find('{')
-            end = content.rfind('}') + 1
-            if start != -1 and end > start:
-                result = json.loads(content[start:end])
-            else:
-                # 如果没有找到JSON，返回默认结果
-                result = {
-                    "passed": True,
-                    "issues": [],
-                    "suggestions": []
-                }
-        except Exception:
-            result = {
-                "passed": True,
-                "issues": [],
-                "suggestions": []
-            }
-        
-        # 调用 after_verify hooks - 所有插件链式修改result
-        hook_results = plugin_manager.call_hook("hook_after_verify", result=result, context=ctx)
-        for hook_result in hook_results:
-            if hook_result and isinstance(hook_result, dict):
-                result.update(hook_result)
-        
-        return result
-    
-    async def improve(
-        self,
-        db: AsyncSession,
-        chapter: Chapter,
-        verification_result: Dict[str, Any],
-        workspace_id: int,
-        focus_issues: Optional[List[str]] = None,
-        model: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
-    ) -> str:
-        """改进章节内容
-        
-        Args:
-            chapter: 章节对象
-            verification_result: 验证结果
-            workspace_id: 工作区ID
-            focus_issues: 重点关注的问题
-            context: 额外上下文
-            
-        Returns:
-            改进后的内容
-        """
-        ctx = context or {}
-        ctx.update({
-            "workspace_id": workspace_id,
-            "chapter": chapter,
-            "verification_result": verification_result,
-            "focus_issues": focus_issues or []
-        })
-        
-        # 调用 before_improve hooks - 所有插件链式修改上下文
-        hook_results = plugin_manager.call_hook("hook_before_improve", context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, dict):
-                ctx.update(result)
-        
-        # 构建改进提示词
-        issues_text = "\n".join([f"- {issue}" for issue in verification_result.get("issues", [])])
-        suggestions_text = "\n".join([f"- {sug}" for sug in verification_result.get("suggestions", [])])
-        
-        base_system = """你是一个专业的小说作家。你的任务是根据编辑的反馈改进章节内容。
-
-要求：
-1. 针对性地解决指出的问题
-2. 保持原有的优点
-3. 不要偏离大纲
-4. 改进后内容应更加完善"""
-        
-        base_user = f"""请改进以下章节内容。
-
-原内容：
-{chapter.content}
-
-发现的问题：
-{issues_text if issues_text else "无明显问题"}
-
-改进建议：
-{suggestions_text if suggestions_text else "无"}
-
-请返回改进后的完整章节内容。"""
-        
-        messages = self._build_prompt("improve", base_system, base_user, ctx)
-        
-        # 调用LLM
-        llm = await self._get_llm(db=db, workspace_id=workspace_id, model=model)
-        response = await llm.ainvoke(messages)
-        improved_content = response.content
-        
-        # 调用 after_improve hooks - 所有插件链式修改content
-        hook_results = plugin_manager.call_hook("hook_after_improve", content=improved_content, context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, str):
-                improved_content = result
-        
-        return improved_content
-    
-    async def update(
-        self,
-        chapter: Chapter,
-        workspace_id: int,
-        context: Optional[Dict[str, Any]] = None
+        chapter_id: int
     ):
-        """更新最终内容，收集插件状态
+        """最终确认章节
         
         Args:
-            chapter: 章节对象
-            workspace_id: 工作区ID
-            context: 额外上下文
+            db: 数据库会话
+            chapter_id: 章节ID
         """
-        ctx = context or {}
-        ctx.update({
-            "workspace_id": workspace_id,
-            "chapter": chapter,
-        })
+        chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+        chapter = chapter_result.scalar_one_or_none()
+        if not chapter:
+            raise ValueError(f"Chapter {chapter_id} not found")
         
-        # 调用 before_update hooks - 所有插件链式修改上下文
-        hook_results = plugin_manager.call_hook("hook_before_update", context=ctx)
-        for result in hook_results:
-            if result and isinstance(result, dict):
-                ctx.update(result)
-        
-        # 收集所有插件的状态快照
-        plugin_snapshot = plugin_manager.collect_plugin_states(workspace_id)
-        chapter.plugin_snapshot = plugin_snapshot
-        
-        # 标记为完成
         chapter.status = ChapterStatus.COMPLETED
         chapter.completed_at = datetime.utcnow()
-        
-        # 调用 after_update hooks
-        plugin_manager.call_hook("hook_after_update", context=ctx)
+        # 只 flush，不 commit，让外层（API）管理事务
+        await db.flush()
 
 
-# 全局生成引擎实例
+# 全局引擎实例
 generation_engine = GenerationEngine()
+
 

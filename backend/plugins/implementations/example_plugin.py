@@ -1,83 +1,104 @@
-"""示例插件 - 展示插件如何实现"""
+"""示例插件 - 融合 Pluggy + AgentMiddleware"""
 from typing import Dict, Any, Optional, List
 from fastapi import APIRouter
+from langchain.agents.middleware import AgentMiddleware
+from langchain_core.tools import tool
+
 from backend.plugins import hookimpl
 
 
+# ============ AgentMiddleware 实现 ============
+
+class ExampleAgentMiddleware(AgentMiddleware):
+    """示例 Middleware - 运行时功能"""
+    
+    # 注入工具
+    tools = []  # 通过 __init__ 动态设置
+    
+    def __init__(self):
+        super().__init__()
+        
+        # 定义工具
+        @tool
+        def example_tool(query: str) -> str:
+            """示例工具 - 演示插件如何注入工具
+            
+            Args:
+                query: 查询内容
+                
+            Returns:
+                示例响应
+            """
+            return f"示例插件收到查询: {query}"
+        
+        self.tools = [example_tool]
+    
+    def modify_model_request(self, request):
+        """修改模型请求 - 注入系统提示词"""
+        # 在系统提示词中添加插件指令
+        plugin_prompt = """
+
+## 示例插件提示
+
+这是示例插件注入的系统提示词。在规划时请注意：
+- 保持情节张力
+- 注重角色成长
+- 考虑世界观一致性
+"""
+        # 修改第一条消息（通常是系统提示词）
+        if request.messages and len(request.messages) > 0:
+            first_msg = request.messages[0]
+            if hasattr(first_msg, 'content'):
+                first_msg.content = first_msg.content + plugin_prompt
+        
+        return request
+
+
+# ============ Pluggy 插件类 ============
+
 class ExamplePlugin:
-    """示例插件 - 展示基本的Hook实现"""
+    """示例插件 - 展示完整的插件实现
+    
+    功能：
+    1. 提供自定义工具（通过 AgentMiddleware）
+    2. 注入系统提示词（通过 AgentMiddleware）
+    3. 扩展 create_plan 参数
+    4. 提供配置 Schema
+    5. 注册自定义 API 路由
+    """
     
     # 插件元数据
     name = "ExamplePlugin"
-    description = "这是一个示例插件，展示如何实现Novel Studio的插件系统"
-    version = "1.0.0"
-    author = "Novel Studio"
+    description = "示例插件 - 展示 Pluggy + AgentMiddleware 融合架构"
+    version = "2.0.0"
+    author = "NovelGen Team"
     
     def __init__(self):
-        # 插件可以维护自己的状态
-        self._states: Dict[int, Dict[str, Any]] = {}
+        # 创建 Middleware 实例
+        self.middleware = ExampleAgentMiddleware()
+    
+    # ============ 核心接口 ============
     
     @hookimpl
-    def hook_inject_system_prompt(self, stage: str, context: Dict[str, Any]) -> Optional[str]:
-        """在系统提示词中注入示例内容"""
-        if stage == "plan":
-            return "<example-plugin>\n这是一个示例插件注入的系统提示词\n</example-plugin>"
-        return None
+    def hook_get_middleware(self) -> AgentMiddleware:
+        """返回 AgentMiddleware 实例"""
+        return self.middleware
     
     @hookimpl
-    def hook_before_plan(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Plan前的处理"""
-        print(f"[{self.name}] Plan阶段开始")
-        return None
-    
-    @hookimpl
-    def hook_extend_create_plan_params(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """扩展 create_plan 工具的参数
-        
-        示例：添加世界观相关的参数
-        """
+    def hook_get_metadata(self) -> Dict[str, Any]:
+        """返回插件元信息"""
         return {
-            "world_setting": {
-                "type": str,
-                "description": "世界观设定",
-                "required": False
-            },
-            "key_items": {
-                "type": List[str],
-                "description": "本章出现的关键物品",
-                "required": False
-            },
-            "location": {
-                "type": str,
-                "description": "主要场景地点",
-                "required": False
-            },
-            "chapter_tags": {
-                "type": List[str],
-                "description": "章节标签（如：战斗、日常、转折）",
-                "required": False
-            }
+            "name": self.name,
+            "version": self.version,
+            "description": self.description,
+            "author": self.author,
+            "config_schema": self.hook_get_config_schema()
         }
     
-    @hookimpl
-    def hook_after_plan(self, plan: str, context: Dict[str, Any]) -> Optional[str]:
-        """Plan后的处理"""
-        print(f"[{self.name}] Plan生成完成，长度: {len(plan)}")
-        return None
+    # ============ 配置管理 ============
     
-    @hookimpl
-    def hook_get_plugin_state(self, workspace_id: int) -> Dict[str, Any]:
-        """获取插件状态"""
-        return self._states.get(workspace_id, {})
-    
-    @hookimpl
-    def hook_set_plugin_state(self, workspace_id: int, state: Dict[str, Any]) -> None:
-        """恢复插件状态"""
-        self._states[workspace_id] = state
-    
-    @hookimpl
     def hook_get_config_schema(self) -> Dict[str, Any]:
-        """返回插件配置Schema"""
+        """返回插件配置 Schema"""
         return {
             "type": "object",
             "title": "示例插件配置",
@@ -118,7 +139,6 @@ class ExamplePlugin:
     @hookimpl
     def hook_validate_config(self, config: Dict[str, Any]) -> bool:
         """验证配置是否合法"""
-        # 简单验证
         if "max_length" in config:
             if not (100 <= config["max_length"] <= 5000):
                 return False
@@ -126,19 +146,84 @@ class ExamplePlugin:
             if config["style"] not in ["formal", "casual", "poetic"]:
                 return False
         return True
-
+    
+    # ============ 扩展功能 ============
+    
+    @hookimpl
+    def hook_extend_create_plan_params(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """扩展 create_plan 工具的参数
+        
+        示例：添加世界观相关的参数
+        """
+        return {
+            "world_setting": {
+                "type": str,
+                "description": "世界观设定",
+                "required": False
+            },
+            "key_items": {
+                "type": List[str],
+                "description": "本章出现的关键物品",
+                "required": False
+            },
+            "location": {
+                "type": str,
+                "description": "主要场景地点",
+                "required": False
+            },
+            "chapter_tags": {
+                "type": List[str],
+                "description": "章节标签（如：战斗、日常、转折）",
+                "required": False
+            }
+        }
+    
     @hookimpl
     def hook_register_api_routes(self) -> List[Dict[str, Any]]:
-        """注册示例插件的API路由"""
+        """注册示例插件的 API 路由"""
         router = APIRouter()
 
         @router.get("/hello")
         async def hello():
-            return {"plugin": self.name, "message": "hello from example plugin"}
+            return {
+                "plugin": self.name,
+                "message": "Hello from Example Plugin!",
+                "version": self.version
+            }
+        
+        @router.get("/status")
+        async def status():
+            return {
+                "plugin": self.name,
+                "status": "running",
+                "features": [
+                    "AgentMiddleware integration",
+                    "Custom tools",
+                    "System prompt injection",
+                    "create_plan extension",
+                    "API routes"
+                ]
+            }
 
         return [{
             "router": router,
             "prefix": "/api/plugins/example",
             "tags": ["plugins", self.name]
         }]
-
+    
+    # ============ 生命周期 ============
+    
+    @hookimpl
+    def hook_on_workspace_init(self, workspace_id: int):
+        """工作区初始化时调用"""
+        print(f"[{self.name}] 工作区 {workspace_id} 初始化")
+    
+    @hookimpl
+    def hook_on_plugin_enabled(self, workspace_id: int):
+        """插件启用时调用"""
+        print(f"[{self.name}] 在工作区 {workspace_id} 中启用")
+    
+    @hookimpl
+    def hook_on_plugin_disabled(self, workspace_id: int):
+        """插件禁用时调用"""
+        print(f"[{self.name}] 在工作区 {workspace_id} 中禁用")

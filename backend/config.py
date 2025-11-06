@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     openai_model: Optional[str] = None  # 默认模型，可被前端覆盖
     
     # 数据库配置
-    database_url: str = "sqlite+aiosqlite:///./novelgen.db"
+    database_url: str = "sqlite+aiosqlite:///./backend/data/novelgen.db"
     
     # API配置
     api_host: str = "0.0.0.0"

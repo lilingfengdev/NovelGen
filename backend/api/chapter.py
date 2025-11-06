@@ -1,13 +1,35 @@
 """Chapter API路由"""
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from backend.database import get_db
 from backend.models.schemas import ChapterResponse
 from backend.services.chapter_service import ChapterService
 
 router = APIRouter()
+
+
+class CreateChapterRequest(BaseModel):
+    workspace_id: int
+    chapter_number: int
+    title: Optional[str] = None
+
+
+@router.post("/chapters", response_model=ChapterResponse)
+async def create_chapter(
+    request: CreateChapterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """创建新章节"""
+    chapter = await ChapterService.create_chapter(
+        db=db,
+        workspace_id=request.workspace_id,
+        chapter_number=request.chapter_number,
+        title=request.title
+    )
+    return chapter.to_dict()
 
 
 @router.get("/workspace/{workspace_id}/chapters", response_model=List[ChapterResponse])

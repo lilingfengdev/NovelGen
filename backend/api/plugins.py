@@ -57,12 +57,13 @@ async def update_workspace_plugin_config(
                 detail=f"Plugin '{plugin_name}' not found"
             )
         
-        # 调用插件的验证hook
-        is_valid = plugin_manager.call_hook_first(
+        # 调用插件的验证 hook
+        validation_results = plugin_manager.call_hook(
             "hook_validate_config",
             config=plugin_config
         )
-        if is_valid is False:
+        # 如果任何插件返回 False，则验证失败
+        if False in validation_results:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid configuration for plugin '{plugin_name}'"
