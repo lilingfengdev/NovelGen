@@ -370,10 +370,10 @@ create_plan 是保存大纲的唯一方式，其他文件操作用于参考和�
 3. 使用 `write_file('/memories/chapters/{chapter_id}.md', content)` 保存内容
 """
         
-        # 配置
+        # 配置 - 继续使用 plan 阶段的 thread_id，保持对话连续性
         config = {
             "configurable": {
-                "thread_id": f"generate_{workspace_id}_{chapter_id}",
+                "thread_id": f"plan_{workspace_id}_{chapter.chapter_number}",
             }
         }
         
